@@ -58,7 +58,6 @@ const SettingDesc SETTINGS[] = {
   { "audio.cacheMaxMB",                SType::U8,      FIELD(audio.cacheMaxMB),        1,     7,      1,    "6",             nullptr,                                nullptr,                     "Sound cache (MB)",                "Audio",       PLA,             0 },
 
   { "bluetoothSpeaker.enabled",        SType::Bool,    FIELD(bluetoothSpeaker.enabled), 0,    1,      1,    "false",         nullptr,                                nullptr,                     "Bluetooth speaker",               "Bluetooth speaker", PLM,       3 },
-  { "bluetoothSpeaker.waitOnWakeMs",   SType::U16,     FIELD(bluetoothSpeaker.waitOnWakeMs), 0, 5000,  500,  "0",             nullptr,                                nullptr,                     "Wait for the link after wake (ms)", "Bluetooth speaker", PL,      0 },
 
   { "keyboard.enabled",                SType::Bool,    FIELD(keyboard.enabled),        0,     1,      1,    "true",          nullptr,                                nullptr,                     "Bluetooth typing",                "Keyboard",    PLM,             5 },
   { "keyboard.typeDelayMs",            SType::U8,      FIELD(keyboard.typeDelayMs),    5,     50,     1,    "12",            nullptr,                                nullptr,                     "Type delay per key (ms)",         "Keyboard",    PL,              0 },

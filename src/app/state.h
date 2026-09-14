@@ -85,6 +85,7 @@ class AppState : private PressHost {
   void buzzTest();                         // console `v`: the current level's pattern at the current strength (§9.5)
   void jackTest(uint8_t jack);             // console `j1`..`j4`: close for 1 s
   bool toggleBluetooth();                  // console `bt`: bluetoothSpeaker.enabled in RAM, rail cycle / AT+POWER_OFF (§7.1)
+  bool startPairing(bool wipe);            // console `p` / `pairwipe`, later the menu and portal (§7.3): AT+PAIR, 60 s; wipe = AT+DELVMLINK first
   bool toggleKeyboard();                   // console `kbd`: keyboard.enabled in RAM (§8.4)
   BleKeyboard& keyboard() { return kbd_; }
 
@@ -132,6 +133,7 @@ class AppState : private PressHost {
   void keyRelease(uint16_t pressId, uint32_t now) override;
   void keyStuck(uint32_t now) override;
   void linkMessage(const char* text, uint32_t ms, uint32_t now);   // §11.4 bottom line, priority 3
+  void tickBluetooth(uint32_t now);                                // §7: link edges, pairing overlay, a deferred rail cycle
   void updateStateWord(uint32_t now);                              // §11.4 bottom line, priority 4
   void    playSound(const char* sound, uint8_t volumePct, uint16_t pressId, uint32_t now, bool repeat) override;
   void    runAction(const sb::Entry& e, uint16_t pressId, uint32_t now) override;
@@ -177,6 +179,11 @@ class AppState : private PressHost {
   bool             kbdInitPending_ = false;
   uint32_t         linkUntil_ = 0;
   bool             kbdWasReady_ = false;
+  // §7: the Bluetooth speaker as the app sees it.
+  bool             btWasLinked_ = false, btCyclePending_ = false, btRecycled_ = false;   // btRecycled_: the one rail cycle allowed for a silent module at boot
+  uint32_t         btNotLinkedSince_ = 0;      // enabled and unlinked since (0 = linked or disabled); NO SPEAKER after 10 s (§7.5)
+  uint32_t         pairTickAt_ = 0;            // next pairing-overlay refresh
+  uint32_t         btProbeAt_ = 0;             // no banner at rail-up: AT+ sent, verdict due (a reset leaves the rail up, the module silent)
   MessageScreen    msgScreen_;
   bool             wokeFromOff_ = false, padSinceWake_ = false, lowWarned_ = false;
   uint32_t         emptyAt_ = 0;

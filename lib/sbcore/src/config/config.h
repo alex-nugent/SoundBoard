@@ -113,7 +113,7 @@ struct Config {
     uint8_t cacheMaxMB;
   } audio;
 
-  struct { bool enabled; uint16_t waitOnWakeMs; } bluetoothSpeaker;
+  struct { bool enabled; } bluetoothSpeaker;
   struct { bool enabled; uint8_t typeDelayMs; uint16_t holdKeysMaxMs; } keyboard;
   struct { bool enabled; uint8_t strengthPct; bool confirmPulse; uint16_t confirmPulseMs, maxPatternMs; } vibration;
   struct { uint8_t mode; uint16_t pulseMs; uint16_t maxFollowMs; bool levelPad; } jacks;   // mode: JacksMode; maxFollowMs 0 = unlimited

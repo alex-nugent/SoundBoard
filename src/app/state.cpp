@@ -579,8 +579,12 @@ void AppState::onRailReady(uint32_t flags, uint32_t now) {
   railReady_ = true;
   bool i2sOk = flags & 2, banner = flags & 1;
   setFault(F_AUDIO, !i2sOk);
-  setFault(F_BT, cfg_.bluetoothSpeaker.enabled && !banner);
-  if (banner && !cfg_.bluetoothSpeaker.enabled) { kcxPowerOffAt_ = kcx_.powerOnAtMs() + 500; if ((int32_t)(now - kcxPowerOffAt_) > 0) kcxPowerOffAt_ = now; if (!kcxPowerOffAt_) kcxPowerOffAt_ = 1; }   // §7.1
+  // A reset (flash, `reboot`, crash) leaves the 5 V rail up and the module running silently in whatever state it had (bench 2026-09-14):
+  // no banner is not proof of a dead module, so ask it (AT+ -> OK+) before raising !BT; and AT+POWER_OFF goes out whether or not it spoke.
+  if (!banner && kcx_.open()) { kcx_.send("AT+"); btProbeAt_ = now + 600; if (!btProbeAt_) btProbeAt_ = 1; }
+  else setFault(F_BT, false);
+  if (!cfg_.bluetoothSpeaker.enabled) { kcxPowerOffAt_ = (banner ? kcx_.powerOnAtMs() : now) + 500; if ((int32_t)(now - kcxPowerOffAt_) > 0) kcxPowerOffAt_ = now; if (!kcxPowerOffAt_) kcxPowerOffAt_ = 1; }   // §7.1
+  if (cfg_.bluetoothSpeaker.enabled) { btNotLinkedSince_ = now ? now : 1; btWasLinked_ = false; }   // §7.5: a wake or an enable restarts the 10 s before NO BT SPEAKER
   // §17.2 J: the startup cue plays from tick() once its file is cached (or known missing), so the file wins over the built-in.
 }
 
@@ -621,6 +625,7 @@ void AppState::linkMessage(const char* text, uint32_t ms, uint32_t now) {   // �
 void AppState::updateStateWord(uint32_t now) {                // §11.4 priority 4: one dim word while something is missing
   const char* w = "";
   if (cfg_.keyboard.enabled && kbd_.initOk() && kbd_.link() != BleKeyboard::Link::Ready && kbd_.notReadySince() && due(now, kbd_.notReadySince() + 10000)) w = "NO TABLET";
+  else if (cfg_.bluetoothSpeaker.enabled && !kcx_.linked() && btNotLinkedSince_ && due(now, btNotLinkedSince_ + 10000)) w = "NO BT SPEAKER";   // §7.5
   else if (cfg_.audio.outputs.speakers) w = "SPEAKERS ON";
   if (strcmp(w, view_.stateWord)) { sb::copyStr(view_.stateWord, sizeof view_.stateWord, w); display_.dirty(R_BOTTOM); }
 }
@@ -629,17 +634,78 @@ bool AppState::toggleBluetooth() {
   char err[64];
   bool on = !cfg_.bluetoothSpeaker.enabled;
   if (!setSetting("bluetoothSpeaker.enabled", on ? "true" : "false", err, sizeof err)) { LOG_W(TAG, "bluetooth: %s", err); return false; }
+  uint32_t now = millis();
   if (on) {
-    if (audio_.playing()) LOG_W(TAG, "bluetooth on: rail cycle deferred until the sound ends");   // §7.1: only when nothing plays
-    LOG_I(TAG, "bluetooth speaker ON: cycling the 5 V rail so the module boots");
     setFault(F_BT, false);
-    audio_.railDown(); audio_.railUp();                                         // queued in order; ~0.5 s without wired audio
+    btNotLinkedSince_ = now ? now : 1; btWasLinked_ = false;                    // §7.5: the 10 s restarts
+    if (audio_.playing()) { btCyclePending_ = true; LOG_I(TAG, "bluetooth speaker ON: the rail cycle waits for the sound to end (§7.1)"); }
+    else { LOG_I(TAG, "bluetooth speaker ON: cycling the 5 V rail so the module boots"); audio_.railDown(); audio_.railUp(); }   // queued in order; ~0.5 s without wired audio
   } else {
     LOG_I(TAG, "bluetooth speaker off: AT+POWER_OFF");
+    btCyclePending_ = false;
+    if (kcx_.pair() != KcxLink::Pair::None) { kcx_.cancelPair(); overlayUntil_ = 0; view_.overlay[0] = 0; view_.overlayBar = false; display_.dirty(R_MAIN); }
     kcx_.powerOff();
+    btWasLinked_ = false; btNotLinkedSince_ = 0;                                // no SPEAKER LOST for a deliberate off; NO SPEAKER clears
+    if (linkUntil_ && !strncmp(view_.link, "BT SPEAKER", 10)) { linkUntil_ = 0; view_.link[0] = 0; display_.dirty(R_BOTTOM); }
     setFault(F_BT, false);
   }
+  updateStateWord(now);
   return on;
+}
+
+bool AppState::startPairing(bool wipe) {                       // §7.3
+  uint32_t now = millis();
+  if (!cfg_.bluetoothSpeaker.enabled) { LOG_W(TAG, "pairing: the Bluetooth speaker is disabled (`bt` first)"); return false; }
+  if (!railReady_) { LOG_W(TAG, "pairing: the audio rail is not up yet"); return false; }
+  if (kcx_.pair() == KcxLink::Pair::Wiping || kcx_.pair() == KcxLink::Pair::Searching) { LOG_W(TAG, "pairing: already searching"); return false; }
+  if (!kcx_.startPair(wipe, now)) return false;
+  pairTickAt_ = 0;                                              // the overlay draws on the next tick
+  linkMessage("PAIR THE BT SPEAKER", KcxLink::PAIR_MS + 1000, now);
+  return true;
+}
+
+void AppState::tickBluetooth(uint32_t now) {                   // §7
+  // A deferred rail cycle (`bt` on while a sound played, §7.1).
+  if (btCyclePending_ && !audio_.playing()) { btCyclePending_ = false; LOG_I(TAG, "bluetooth speaker ON: cycling the 5 V rail now"); audio_.railDown(); audio_.railUp(); }
+  if (btProbeAt_ && due(now, btProbeAt_)) {
+    btProbeAt_ = 0;
+    bool alive = kcx_.alive();
+    LOG_I(TAG, "KCX after a silent rail-up: %s", alive ? "alive (answered AT+), it kept its state through the reset" : "no reply: soft-off from before the reset, or missing");
+    if (cfg_.bluetoothSpeaker.enabled && !alive && !btRecycled_ && !audio_.playing()) {
+      btRecycled_ = true;                                        // once: a soft-off module only reboots with its rail
+      LOG_I(TAG, "bluetooth speaker enabled but the module is silent: cycling the 5 V rail once");
+      audio_.railDown(); audio_.railUp();
+    } else setFault(F_BT, cfg_.bluetoothSpeaker.enabled && !alive);
+  }
+  // Link edges in plain words (§7.5, §11.4).
+  bool linked = kcx_.linked();
+  if (linked != btWasLinked_) {
+    btWasLinked_ = linked;
+    if (cfg_.bluetoothSpeaker.enabled && railReady_) {
+      if (linked) { linkMessage("BT SPEAKER LINKED", 4000, now); btNotLinkedSince_ = 0; }
+      else        { linkMessage("BT SPEAKER LOST", 4000, now); btNotLinkedSince_ = now ? now : 1; }
+    }
+  }
+  // Pairing (§7.3): the overlay and the outcome.
+  KcxLink::Pair p = kcx_.pair();
+  if (p == KcxLink::Pair::Wiping || p == KcxLink::Pair::Searching) {
+    if (due(now, pairTickAt_)) {
+      pairTickAt_ = now + 1000;
+      uint32_t left = kcx_.pairLeftMs(now);
+      sb::copyStr(view_.overlay, sizeof view_.overlay, "PAIRING");
+      view_.overlayBar = true; view_.overlayPct = (uint8_t)(left * 100 / KcxLink::PAIR_MS);
+      overlayUntil_ = now + 1500; if (!overlayUntil_) overlayUntil_ = 1;   // re-asserted every second, so a volume popup only borrows the spot
+      if (!view_.link[0]) linkMessage("PAIR THE BT SPEAKER", left + 1000, now);
+      display_.dirty(R_MAIN);
+    }
+  } else if (p == KcxLink::Pair::Connected || p == KcxLink::Pair::Timeout) {
+    kcx_.pairAck();
+    overlayUntil_ = 0; view_.overlay[0] = 0; view_.overlayBar = false; display_.dirty(R_MAIN);
+    if (p == KcxLink::Pair::Connected) {
+      if (strcmp(view_.link, "BT SPEAKER LINKED")) linkMessage("BT SPEAKER LINKED", 4000, now);   // usually the link edge above said it already
+      playCue(cfg_.audio.cues.saved, sb::ToneKind::Saved, volume_.clickGain());                    // the module has saved it; the cue confirms
+    } else linkMessage("NO BT SPEAKER FOUND", 5000, now);           // the menu/portal then offer forget-and-pair (§7.3 step 4)
+  }
 }
 
 void AppState::updateHoldBar(uint32_t now) {
@@ -954,6 +1020,7 @@ void AppState::tick() {
 
   kcx_.tick(now, cfg_.bluetoothSpeaker.enabled);
   if (kcxPowerOffAt_ && due(now, kcxPowerOffAt_)) { kcxPowerOffAt_ = 0; if (!cfg_.bluetoothSpeaker.enabled) kcx_.powerOff(); }
+  tickBluetooth(now);
   if (ampOffAt_ && due(now, ampOffAt_)) { ampOffAt_ = 0; if (!audio_.playing()) ampEnable(false); }
   if (volPersistAt_ && due(now, volPersistAt_) && !audio_.playing()) { volPersistAt_ = 0; if (volume_.dirty()) Storage::deferredWrite(&AppState::volumeWriteThunk, this); }
   if (startupCuePending_ && railReady_) {                       // §6.5 / §17.2 J: the cue file is cached first; wait for it (3 s cap), else the built-in
@@ -1091,9 +1158,14 @@ void AppState::printStatus(Print& out) {
   out.println();
   battery_.printStatus(out);
   haptics_.printStatus(out, millis()); jacks_.printStatus(out);
-  out.printf("power: sleep after %u min%s | off-return %s | links: KBD %s, BT (Phase 8)\n", (unsigned)cfg_.power.sleepAfterMin, cfg_.power.sleepAfterMin ? "" : " (never)",
+  out.printf("power: sleep after %u min%s | off-return %s | links: KBD %s, BT %s\n", (unsigned)cfg_.power.sleepAfterMin, cfg_.power.sleepAfterMin ? "" : " (never)",
              wokeFromOff_ ? (padSinceWake_ ? "cleared by a pad press" : "armed (Off-wake, no pad press yet)") : "n/a (not an Off-wake)",
-             kbd_.link() == BleKeyboard::Link::Ready ? "ready" : kbd_.link() == BleKeyboard::Link::Connecting ? "connecting" : kbd_.link() == BleKeyboard::Link::Advertising ? "advertising" : "off");
+             kbd_.link() == BleKeyboard::Link::Ready ? "ready" : kbd_.link() == BleKeyboard::Link::Connecting ? "connecting" : kbd_.link() == BleKeyboard::Link::Advertising ? "advertising" : "off",
+             cfg_.bluetoothSpeaker.enabled ? kcx_.linkName() : "off");
+  out.printf("bluetooth speaker: %s | module %s%s | link %s | pairing %s%s | last line \"%s\" | %lu CONNECT line(s) | NO BT SPEAKER %s | rail cycle %s\n",
+             cfg_.bluetoothSpeaker.enabled ? "enabled" : "disabled", kcx_.open() ? (kcx_.powerOnSeen() ? "alive" : "no banner") : "unpowered", kcx_.softOff() ? " (soft off)" : "",
+             kcx_.linkName(), kcx_.pairName(), kcx_.pair() == KcxLink::Pair::Searching ? " (AT+PAIR sent)" : "", kcx_.lastLine(), (unsigned long)kcx_.connects(),
+             btNotLinkedSince_ ? "armed" : "clear", btCyclePending_ ? "pending" : "none");
   kbd_.printStatus(out);
   audio_.printStatus(out);
   out.printf("cache: %u of %u cached, %lu KB of %lu KB, loader %s | speakers %s (amp %s) | bluetooth %s | scope pin IO%d\n",

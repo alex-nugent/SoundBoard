@@ -119,6 +119,31 @@ after `jacks.maxFollowMs`, on a stuck pad or on a level change. `s` adds a
 motor line and the closed jacks. SLEEP waits for a running pattern; OFF and
 FAULT stop the motor and open every relay at once.
 
+Bluetooth speaker (Phase 8): with `bluetoothSpeaker.enabled` the KCX module
+boots with the 5 V rail and relinks to its last speaker by itself; the
+firmware only watches its lines (`POWER ON`, `MacAdd:…,Name:…` + `CON LAST`
+on a link, `DISCONNECT`, `OK+STATUS:n`, `SCAN....`) and asks `AT+STATUS?`
+every 60 s while unlinked. The module is a KCX_BT_RTX V1.4 and every command
+needs CR LF (`docs/bluetooth-module.md`; `kcxcrlf` toggles it for the bench,
+`pin <n>` dumps a GPIO's routing). The
+bottom line says BT SPEAKER LINKED / BT SPEAKER LOST for 4 s at each change
+and NO BT SPEAKER, dim, once the speaker has been enabled for 10 s without a
+link (a wake or an enable restarts the 10 s). Pairing (`p`, later the menu
+and the portal) sends `AT+PAIR` and shows PAIRING with a 60 s countdown bar
+over the numeral and PAIR THE BT SPEAKER on the bottom line; a link report
+that arrives after the start ends it with BT SPEAKER LINKED and the saved
+cue, the timeout with NO BT SPEAKER FOUND. `pairwipe` is the only path that
+sends `AT+DELVMLINK` (forget every saved speaker), then pairs. Disabling sends
+`AT+POWER_OFF` and clears the speaker words without a BT SPEAKER LOST; enabling
+cycles the rail once nothing is playing. After a wake the module relinks by
+itself in about 4 s; sounds pressed before that play on the wired path only
+(the wake-wait option of Draft 4 was dropped at CP-8: a link report is not
+yet an audio stream, so the held-back sound was lost anyway). The Bluetooth
+path also lags the wired and on-board outputs by 250-500 ms, so in practice
+one output is used at a time. `s` prints a `bluetooth speaker:` line: module
+alive / soft off, link, pairing state, the module's last line and a pending
+rail cycle.
+
 Bluetooth LE keyboard (Phase 7): the board advertises as `device.name`
 (default `SoundBoard V4`) whenever `keyboard.enabled` and no host is
 connected; pair from the host's Bluetooth settings ("Just Works", no

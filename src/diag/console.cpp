@@ -8,6 +8,7 @@
 #include <Arduino.h>
 #include <esp_heap_caps.h>
 #include <esp_task_wdt.h>
+#include <driver/gpio.h>
 #include <string.h>
 
 namespace Console {
@@ -35,13 +36,14 @@ static void printHelp() {
   Serial.println("  + | -             attendant click (volume)    ++   both-button tap (level 1)    h+ | h-   long hold (next / prev level)");
   Serial.println("  l                 live pad deltas at 1 Hz    c   recalibrate pads");
   Serial.println("  b | bt            toggle on-board speakers / Bluetooth speaker    sounds   cache listing    AT+...  to the KCX");
+  Serial.println("  p | pairwipe      pair a Bluetooth speaker (AT+PAIR, 60 s) / forget all saved speakers, then pair (AT+DELVMLINK first)");
   Serial.println("  play <file.wav>   bench: play a card file directly");
   Serial.println("  sleep | off       SLEEP now (any pad or button wakes) / OFF now (a button held ~0.5 s wakes)");
   Serial.println("  batt [V|clear]    battery status; `batt 4.12` calibrates K against a meter on VBAT; `batt clear` = design divider");
   Serial.println("  batt fake <V> [nousb]|off  bench: every sample reads <V> (RAM only), `nousb` also fakes USB absent: low-battery row, BATTERY EMPTY -> OFF");
   Serial.println("  kbd | kbdforget   toggle the BLE keyboard (RAM) / forget every bonded host (ble_store_clear)");
   Serial.println("  kbdtype <text>    bench: type text to the host    kbdkey <NAME> [ms]   bench: tap a key, or hold it for ms (Appendix B names)");
-  Serial.println("  later phases: p pairwipe AT+... (8)  m (9)  w (10)");
+  Serial.println("  later phases: m (9)  w (10)");
   Serial.println();
 }
 
@@ -76,7 +78,7 @@ static void handleLine(char* line, uint32_t now) {
       case 'c': s_app->recalibrate(); Serial.println("recalibrating: hands off the pads"); return;
       case 'b': Serial.printf("on-board speakers %s\n", s_app->toggleSpeakers() ? "ON" : "off"); return;
       case 'v': s_app->buzzTest(); return;
-      case 'p': notYet("speaker pairing", 8); return;
+      case 'p': Serial.println(s_app->startPairing(false) ? "pairing: put the speaker in pairing mode; searching for 60 s" : "pairing not started (see the log)"); return;
       case 'm': notYet("Quick Menu", 9); return;
       case 'w': notYet("Wi-Fi setup", 10); return;
       default: Serial.printf("unknown command '%c' -- ? for help\n", cmd[0]); return;
@@ -84,6 +86,9 @@ static void handleLine(char* line, uint32_t now) {
   }
 
   if (!strcmp(cmd, "help")) { printHelp(); return; }
+  if (!strcmp(cmd, "kcxcrlf")) { s_app->kcx().setCrlf(!s_app->kcx().crlf()); Serial.printf("KCX commands end with %s\n", s_app->kcx().crlf() ? "CR LF" : "nothing"); return; }
+  if (!strcmp(cmd, "pin")) { int n = atoi(rest); gpio_dump_io_configuration(stdout, 1ULL << n); fflush(stdout); return; }
+  if (!strcmp(cmd, "pairwipe")) { Serial.println(s_app->startPairing(true) ? "forgetting all saved speakers, then pairing: put the speaker in pairing mode; searching for 60 s" : "pairing not started (see the log)"); return; }
   if (!strcmp(cmd, "reboot")) { Serial.println("rebooting"); Serial.flush(); delay(50); ESP.restart(); return; }
   if (!strcmp(cmd, "crash")) { Serial.println("abort() now: expect a panic, a core dump and a reboot"); Serial.flush(); delay(50); abort(); }
   if (!strcmp(cmd, "wdt")) {
@@ -213,7 +218,6 @@ static void handleLine(char* line, uint32_t now) {
     Serial.println(s_app->keyboard().keyByName(rest, hold, millis()) ? (hold ? "held" : "tapped") : "not sent: unknown key name, no host ready, or the queue is full");
     return;
   }
-  if (!strcmp(cmd, "pairwipe")) { notYet("speaker pairing", 8); return; }
   if (cmd[0] == 'j' && cmd[1] >= '1' && cmd[1] <= '4' && !cmd[2]) { s_app->jackTest((uint8_t)(cmd[1] - '1')); Serial.printf("J%c closed for 1 s\n", cmd[1]); return; }
   if ((cmd[0] >= '1' && cmd[0] <= '4') && !cmd[1]) { s_app->simulatePress((uint8_t)(cmd[0] - '1'), (uint32_t)atoi(rest)); return; }
   Serial.printf("unknown command \"%s\" -- ? for help\n", cmd);

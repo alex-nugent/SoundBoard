@@ -21,7 +21,7 @@ static const char* SAMPLE_EXAMPLE = R"JSON({
   "audio": { "volumePct": 60, "stepPct": 10, "maxGain": 0.5, "clickVolume": 3, "outputs": { "speakers": false },
              "startupCue": false, "cues": { "startup": "_startup.wav", "click": "_click.wav", "saved": "_saved.wav", "lowBattery": "" },
              "cacheMaxMB": 6 },
-  "bluetoothSpeaker": { "enabled": false, "waitOnWakeMs": 0 },
+  "bluetoothSpeaker": { "enabled": false },
   "keyboard": { "enabled": true, "typeDelayMs": 12, "holdKeysMaxMs": 3000 },
   "vibration": { "enabled": true, "strengthPct": 100, "confirmPulse": false, "confirmPulseMs": 200, "maxPatternMs": 4000 },
   "jacks": { "mode": "follow", "pulseMs": 500, "maxFollowMs": 10000, "levelPad": false },
