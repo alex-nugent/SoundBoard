@@ -1,0 +1,11 @@
+{
+  "name": "sbcore",
+  "version": "0.1.0",
+  "description": "SoundBoard V4 pure logic: configuration schema, loader, validation, migration (no Arduino headers; compiled for the board and for the native tests).",
+  "build": {
+    "srcDir": "src"
+  },
+  "dependencies": {
+    "bblanchon/ArduinoJson": "^7.4"
+  }
+}
