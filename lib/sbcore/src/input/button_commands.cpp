@@ -44,18 +44,19 @@ ButtonCmd ButtonCommands::feed(uint32_t now, bool minusDown, bool plusDown) {
         btn_ = which; tDown_ = now;
         break;
       }
+      if (menuMode_) break;                                                     // §14.4: no long holds in the menu, a click on the release
       if (elapsed(now, tDown_, d_.attendantHoldMs)) { st_ = St::Consumed; out = longHold(btn_); }
       break;
 
     case St::Both:
       if (both) {
         if (!stage1_ && elapsed(now, tBoth_, d_.offHoldMs)) stage1_ = true;
-        if (elapsed(now, tBoth_, d_.menuHoldMs)) { st_ = St::Consumed; out = ButtonCmd::Menu; }
+        if (!menuMode_ && d_.menuHoldMs && elapsed(now, tBoth_, d_.menuHoldMs)) { st_ = St::Consumed; out = ButtonCmd::Menu; }   // rule 5: no stage 2 in the menu
         break;
       }
       st_ = St::Consumed;                                                       // one or both released
-      if (stage1_) { if (!suppressOff_) out = ButtonCmd::Off; }                 // stage 1 reached: OFF (rule 3 may suppress it)
-      else if (!elapsed(now, tBoth_, d_.bothTapMs)) out = ButtonCmd::Level1;   // a quick tap of both: level 1
+      if (stage1_) { if (!suppressOff_) out = ButtonCmd::Off; }                 // stage 1 reached: OFF, or in the menu "exit and save" (rule 3 may suppress it)
+      else if (!menuMode_ && !elapsed(now, tBoth_, d_.bothTapMs)) out = ButtonCmd::Level1;   // a quick tap of both: level 1 (rule 2: none in the menu)
       break;
 
     case St::Consumed:
@@ -76,6 +77,7 @@ HoldProgress ButtonCommands::progress(uint32_t now) const {
       // Shown once a press has outlived a click (150 ms) so clicks do not flicker the bar.
       uint32_t el = now - tDown_;
       if (el < 150) return p;
+      if (menuMode_) return p;                                  // no long holds in the menu: no bar
       p.kind = btn_ == 0 ? HoldKind::PrevLevel : HoldKind::NextLevel;
       p.pct = pctOf(el, d_.attendantHoldMs);
       return p;
@@ -86,6 +88,7 @@ HoldProgress ButtonCommands::progress(uint32_t now) const {
       p.kind = HoldKind::Both;
       if (el < d_.offHoldMs) { p.pct = pctOf(el, d_.offHoldMs); return p; }
       p.offReached = true;
+      if (menuMode_ || !d_.menuHoldMs) { p.pct = 100; return p; }   // no stage 2: the bar stays full until the release
       uint32_t span = d_.menuHoldMs > d_.offHoldMs ? d_.menuHoldMs - d_.offHoldMs : 1;
       p.pct = pctOf(el - d_.offHoldMs, span);
       uint32_t left = el < d_.menuHoldMs ? d_.menuHoldMs - el : 0;

@@ -57,6 +57,25 @@ struct NormalScreen : Screen {
   void draw(Display& d, uint8_t regions) override;
 };
 
+// §14.2: the Quick Menu; filled by the app from the menu model.
+struct MenuView {
+  uint8_t  index = 0, count = 1;     // 0-based item and the total, shown as "n / N"
+  char     label[40] = "";           // the item, scale 2
+  char     value[24] = "";           // the value line, scale 3 ("" for an action item)
+  bool     action = false;           // an action item: the value line says how to run it, no arrows
+  bool     canUp = true, canDown = true;   // the arrows dim at the ends of a range
+  char     result[24] = "";          // an action's result, in place of the value line while set
+  char     keys[4][8] = { "BACK", "DOWN", "UP", "NEXT" };   // one word above each pad, scale 2 ("" = that pad does nothing here); an action names itself: SAVE, CANCEL, PAIR, START
+  bool     holdBar = false;          // both-hold: the exit bar along the bottom
+  uint8_t  holdPct = 0;
+  bool     holdOffReached = false;
+};
+
+struct MenuScreen : Screen {
+  const MenuView* view = nullptr;
+  void draw(Display& d, uint8_t regions) override;
+};
+
 // §11.8 / §12.3: "OFF" or "BATTERY EMPTY" at a big scale, optional second line.
 struct MessageScreen : Screen {
   const char* text = "";

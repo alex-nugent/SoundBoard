@@ -28,6 +28,7 @@
 #include "app/jacks.h"
 #include "ble/keyboard.h"
 #include "app/levels.h"
+#include "app/menu_model.h"
 
 enum class BootKind : uint8_t { Cold, SleepWake, OffWake };
 
@@ -44,7 +45,7 @@ struct BootInfo {
   uint8_t  wakeButtons = 0;              // an ext1 wake: bit 0 minus, bit 1 plus
 };
 
-enum class AppMode : uint8_t { Boot, Active, Dimmed, Fault };
+enum class AppMode : uint8_t { Boot, Active, Dimmed, Menu, Fault };
 
 class AppState : private PressHost {
  public:
@@ -82,9 +83,13 @@ class AppState : private PressHost {
   void recalibrate();
   void playFile(const char* name);         // bench: play a card file (or its missing tone) as if a pad had asked
   bool toggleSpeakers();                   // console `b`: audio.outputs.speakers in RAM
+  bool setSpeakers(bool on);               // the menu item and `b`: live (§14.5)
   void buzzTest();                         // console `v`: the current level's pattern at the current strength (§9.5)
   void jackTest(uint8_t jack);             // console `j1`..`j4`: close for 1 s
   bool toggleBluetooth();                  // console `bt`: bluetoothSpeaker.enabled in RAM, rail cycle / AT+POWER_OFF (§7.1)
+  bool setBluetooth(bool on);              // the menu item and `bt`
+  void openMenu(const char* why);          // §14.1: from ACTIVE or DIMMED (the both-hold, console `m`)
+  void closeMenu(bool save, const char* why);   // Exit / both-hold / timeout save if anything changed; Cancel restores
   bool startPairing(bool wipe);            // console `p` / `pairwipe`, later the menu and portal (§7.3): AT+PAIR, 60 s; wipe = AT+DELVMLINK first
   bool toggleKeyboard();                   // console `kbd`: keyboard.enabled in RAM (§8.4)
   BleKeyboard& keyboard() { return kbd_; }
@@ -134,6 +139,18 @@ class AppState : private PressHost {
   void keyStuck(uint32_t now) override;
   void linkMessage(const char* text, uint32_t ms, uint32_t now);   // §11.4 bottom line, priority 3
   void tickBluetooth(uint32_t now);                                // §7: link edges, pairing overlay, a deferred rail cycle
+  // §14: the Quick Menu (app/menu.cpp)
+  enum class MenuKey : uint8_t { Next, Prev, Up, Down };
+  void menuKey(MenuKey k, uint32_t now);
+  void menuStep(int dir, uint32_t now);
+  void menuSetValue(const char* path, const char* text, uint32_t now);
+  void menuRunAction(uint32_t now);
+  void menuResult(const char* text, uint32_t ms, uint32_t now);
+  void menuPairResult(bool connected, uint32_t now);
+  void refreshMenuItem();
+  void tickMenu(uint32_t now);
+  void setVolumeLive(uint8_t pct, uint32_t now);
+  void volumeChanged(uint32_t now, bool popup);                    // after any master-volume change: gain, RTC, status row, NVS write-behind
   void updateStateWord(uint32_t now);                              // §11.4 bottom line, priority 4
   void    playSound(const char* sound, uint8_t volumePct, uint16_t pressId, uint32_t now, bool repeat) override;
   void    runAction(const sb::Entry& e, uint16_t pressId, uint32_t now) override;
@@ -185,6 +202,13 @@ class AppState : private PressHost {
   uint32_t         pairTickAt_ = 0;            // next pairing-overlay refresh
   uint32_t         btProbeAt_ = 0;             // no banner at rail-up: AT+ sent, verdict due (a reset leaves the rail up, the module silent)
   MessageScreen    msgScreen_;
+  // §14: the Quick Menu.
+  sb::MenuModel    menu_;
+  MenuView         menuView_;
+  MenuScreen       menuScreen_;
+  sb::HoldProgress menuHold_;
+  uint32_t         menuLastKeyAt_ = 0, menuResultUntil_ = 0, menuPairTickAt_ = 0;
+  bool             menuCalibrating_ = false;
   bool             wokeFromOff_ = false, padSinceWake_ = false, lowWarned_ = false;
   uint32_t         emptyAt_ = 0;
   uint8_t          level_ = 0;                 // mirrors levels_.current()

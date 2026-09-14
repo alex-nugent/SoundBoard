@@ -144,6 +144,36 @@ one output is used at a time. `s` prints a `bluetooth speaker:` line: module
 alive / soft off, link, pairing state, the module's last line and a pending
 rail cycle.
 
+Quick Menu (Phase 9): both buttons held `menu.holdMs` (3 s; the bar reads
+"OFF - release" then "MENU in 2… 1…") open the SETTINGS screen from ACTIVE or
+DIMMED; console `m` opens it too (and `m` again exits and saves). The items
+are the descriptor rows flagged `MENU` in `menuOrder` plus the fixed ones
+(`lib/sbcore/src/app/menu_model.*`, native-tested): On-board speakers,
+Volume, Bluetooth speaker, Pair BT speaker, Bluetooth typing, Buzz, Screen
+brightness, Recalibrate buttons, Wi-Fi setup (a stub until Phase 10: "NOT
+AVAILABLE YET"), Exit (save), Cancel. Keys are fixed positions whatever
+`pads.roles` says: P1 next, P4 back, P2 or + up, P3 or − down; console `1`-`4`
+and `+`/`-` do the same, `mrun` stands in for the + hold. Every value applies
+live through the same paths as the console `set` (the speakers switch, the
+volume moves with a click at the new level, the Bluetooth speaker cycles its
+rail or powers off, Buzz on gives one pulse, brightness fades); the
+configuration is written once on exit if a value differs from the entry
+snapshot ("SAVED" over the numeral, the saved cue from the write), Cancel puts
+every touched value back live, and `menu.timeoutS` (30 s) without a key exits
+and saves. An action runs when + has been held 1 s (2 s for Wi-Fi setup) with
+a bar filling under the value line; its result replaces the value line for a
+few seconds. Pair BT speaker shows SEARCHING with the countdown, then
+CONNECTED or NO SPEAKER FOUND, after which the hint offers "hold + 2 s: forget
+speakers, pair again" (`AT+DELVMLINK` first, the only path that sends it).
+Recalibrate shows the "keep hands off" screen and returns to the menu with
+DONE. A fresh both-hold released after `power.offHoldMs` exits and saves
+("EXIT - release" on the bar); in the menu there is no both tap, no long hold
+of − and no second stage of the both-hold, and pads never play. SLEEP, DIMMED
+and the return to level 1 are blocked while it is open. `menu.enabled: false`
+removes the command: the both-hold stops at OFF. `s` prints a `menu:` line
+(open/closed, item count, hold and timeout) and, while open, the current item
+and value.
+
 Bluetooth LE keyboard (Phase 7): the board advertises as `device.name`
 (default `SoundBoard V4`) whenever `keyboard.enabled` and no host is
 connected; pair from the host's Bluetooth settings ("Just Works", no

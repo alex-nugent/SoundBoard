@@ -21,9 +21,9 @@
     { "name": "TWO",    "buttons": [ { "sound": "choices.wav",  "label": "Choices" },
                                      { "sound": "letters.wav",  "label": "Letters" },
                                      { "sound": "numbers.wav",  "label": "Numbers" } ] },
-    { "name": "VOLUME", "buttons": [ { "action": "volumeUp",   "label": "Louder" },
+    { "name": "VOLUME", "buttons": [ { "action": "volumeDown", "label": "Quieter" },
                                      { "action": "mute",       "label": "Mute" },
-                                     { "action": "volumeDown", "label": "Quieter" } ] },
+                                     { "action": "volumeUp",   "label": "Louder" } ] },
     { "name": "FOUR",   "buttons": [ { "sound": "hello.wav",    "label": "Hello" },
                                      { "sound": "thankyou.wav", "label": "Thank you" },
                                      { "sound": "goodbye.wav",  "label": "Goodbye" } ] }

@@ -14,8 +14,10 @@ constexpr int8_t I2S_BCLK   = 21;
 constexpr int8_t I2S_LRCLK  = 38;
 constexpr int8_t I2S_DIN    = 16;
 constexpr int8_t SHIELD     = 14;   // touch shield copper (T14)
-constexpr int8_t BTN_MINUS  = 6;    // U4, active low, RTC pin
-constexpr int8_t BTN_PLUS   = 8;    // U5, active low, RTC pin
+// The two buttons sit one behind the other in the case. CP-9 (Alex): "up" must be the far button and
+// "down" the near one, so U5/IO8 (near) is − and U4/IO6 (far) is +; the Draft 4 pin map had them the other way.
+constexpr int8_t BTN_MINUS  = 8;    // U5 (near), active low, RTC pin
+constexpr int8_t BTN_PLUS   = 6;    // U4 (far), active low, RTC pin
 constexpr int8_t TFT_DC     = 1;
 constexpr int8_t TFT_BLK    = 7;    // LEDC channel 2 (timer 1), 5 kHz, 8-bit
 constexpr int8_t TFT_CS     = 34;

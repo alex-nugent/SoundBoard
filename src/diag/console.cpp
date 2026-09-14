@@ -43,7 +43,8 @@ static void printHelp() {
   Serial.println("  batt fake <V> [nousb]|off  bench: every sample reads <V> (RAM only), `nousb` also fakes USB absent: low-battery row, BATTERY EMPTY -> OFF");
   Serial.println("  kbd | kbdforget   toggle the BLE keyboard (RAM) / forget every bonded host (ble_store_clear)");
   Serial.println("  kbdtype <text>    bench: type text to the host    kbdkey <NAME> [ms]   bench: tap a key, or hold it for ms (Appendix B names)");
-  Serial.println("  later phases: m (9)  w (10)");
+  Serial.println("  m                 open the Quick Menu (m again: exit and save); in it: 1 back, 2 or - down, 3 or + up / OK, 4 next");
+  Serial.println("  w                 Wi-Fi setup (Phase 10)");
   Serial.println();
 }
 
@@ -79,7 +80,10 @@ static void handleLine(char* line, uint32_t now) {
       case 'b': Serial.printf("on-board speakers %s\n", s_app->toggleSpeakers() ? "ON" : "off"); return;
       case 'v': s_app->buzzTest(); return;
       case 'p': Serial.println(s_app->startPairing(false) ? "pairing: put the speaker in pairing mode; searching for 60 s" : "pairing not started (see the log)"); return;
-      case 'm': notYet("Quick Menu", 9); return;
+      case 'm':
+        if (s_app->mode() == AppMode::Menu) { s_app->closeMenu(true, "console"); Serial.println("menu closed (saved if anything changed)"); }
+        else { s_app->openMenu("console"); Serial.println(s_app->mode() == AppMode::Menu ? "menu open: 1 back, 2 or - down, 3 or + up (OK on an action), 4 next, m exits and saves" : "menu not opened (see the log)"); }
+        return;
       case 'w': notYet("Wi-Fi setup", 10); return;
       default: Serial.printf("unknown command '%c' -- ? for help\n", cmd[0]); return;
     }

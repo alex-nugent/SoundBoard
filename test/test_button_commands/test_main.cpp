@@ -179,6 +179,72 @@ void test_menu_mode_click_resolves_on_release() {
   TEST_ASSERT_EQUAL((int)ButtonCmd::VolumeUp, (int)fired[1]);
 }
 
+// §4.2 rule 5 / §14.4: the menu mode.
+void test_menu_mode_no_both_tap_and_off_means_exit() {
+  bc.setMenuMode(true);
+  hold(200, true, true);
+  hold(5, false, false);
+  TEST_ASSERT_EQUAL(0, fired.size());                       // no both tap in the menu
+  hold(1200, true, true);
+  HoldProgress p = bc.progress(T);
+  TEST_ASSERT_EQUAL((int)HoldKind::Both, (int)p.kind);
+  TEST_ASSERT_TRUE(p.offReached);
+  TEST_ASSERT_EQUAL(100, p.pct);                            // no stage 2: the bar stays full
+  hold(5, false, false);
+  TEST_ASSERT_EQUAL(1, fired.size());
+  TEST_ASSERT_EQUAL((int)ButtonCmd::Off, (int)fired[0]);    // the app reads it as exit-and-save
+}
+
+void test_menu_mode_holding_past_menu_hold_does_not_reopen() {
+  bc.setMenuMode(true);
+  hold(BOTH_MENU + 1000, true, true);
+  TEST_ASSERT_EQUAL(0, fired.size());
+  hold(5, false, false);
+  TEST_ASSERT_EQUAL(1, fired.size());
+  TEST_ASSERT_EQUAL((int)ButtonCmd::Off, (int)fired[0]);
+}
+
+void test_menu_mode_plus_held_long_is_one_click() {
+  bc.setMenuMode(true);
+  hold(3000, false, true);
+  TEST_ASSERT_EQUAL(0, fired.size());
+  TEST_ASSERT_EQUAL((int)HoldKind::None, (int)bc.progress(T).kind);   // no bar, no long hold
+  hold(5, false, false);
+  TEST_ASSERT_EQUAL(1, fired.size());
+  TEST_ASSERT_EQUAL((int)ButtonCmd::VolumeUp, (int)fired[0]);        // one step / one action on the release
+}
+
+void test_menu_mode_minus_has_no_long_hold() {
+  bc.setMenuMode(true);
+  hold(3000, true, false);
+  TEST_ASSERT_EQUAL(0, fired.size());
+  TEST_ASSERT_EQUAL((int)HoldKind::None, (int)bc.progress(T).kind);   // no bar for a minus hold
+  hold(5, false, false);
+  TEST_ASSERT_EQUAL(1, fired.size());
+  TEST_ASSERT_EQUAL((int)ButtonCmd::VolumeDown, (int)fired[0]);      // one value step on the release
+}
+
+void test_menu_disabled_both_hold_stops_at_off() {          // menu.enabled false: menuHoldMs 0
+  ButtonDurations d; d.menuHoldMs = 0; bc.setDurations(d);
+  hold(BOTH_MENU + 2000, true, true);
+  TEST_ASSERT_EQUAL(0, fired.size());
+  HoldProgress p = bc.progress(T);
+  TEST_ASSERT_TRUE(p.offReached);
+  TEST_ASSERT_EQUAL(100, p.pct);
+  TEST_ASSERT_EQUAL(0, p.secondsLeft);
+  hold(5, false, false);
+  TEST_ASSERT_EQUAL(1, fired.size());
+  TEST_ASSERT_EQUAL((int)ButtonCmd::Off, (int)fired[0]);
+}
+
+void test_leaving_menu_mode_restores_long_holds() {
+  bc.setMenuMode(true);
+  bc.setMenuMode(false);
+  hold(HOLD, false, true);
+  TEST_ASSERT_EQUAL(1, fired.size());
+  TEST_ASSERT_EQUAL((int)ButtonCmd::NextLevel, (int)fired[0]);
+}
+
 void test_progress_bar_for_single_hold() {
   hold(100, false, true);
   TEST_ASSERT_EQUAL((int)HoldKind::None, (int)bc.progress(T).kind);   // too early for a bar
@@ -228,6 +294,12 @@ int main(int, char**) {
   RUN_TEST(test_both_tap_works_while_off_suppressed);
   RUN_TEST(test_menu_still_reachable_while_off_suppressed);
   RUN_TEST(test_menu_mode_click_resolves_on_release);
+  RUN_TEST(test_menu_mode_no_both_tap_and_off_means_exit);
+  RUN_TEST(test_menu_mode_holding_past_menu_hold_does_not_reopen);
+  RUN_TEST(test_menu_mode_plus_held_long_is_one_click);
+  RUN_TEST(test_menu_mode_minus_has_no_long_hold);
+  RUN_TEST(test_menu_disabled_both_hold_stops_at_off);
+  RUN_TEST(test_leaving_menu_mode_restores_long_holds);
   RUN_TEST(test_progress_bar_for_single_hold);
   RUN_TEST(test_progress_bar_for_both_hold);
   RUN_TEST(test_click_then_other_button_hold);

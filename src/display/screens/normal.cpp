@@ -83,7 +83,8 @@ static void drawBottom(Adafruit_GFX& g, const NormalView& v, const Theme& t) {
     if (v.holdKind == 1) snprintf(cap, sizeof cap, "PREV LEVEL");
     else if (v.holdKind == 2) snprintf(cap, sizeof cap, "NEXT LEVEL");
     else if (!v.holdOffReached) snprintf(cap, sizeof cap, "OFF");
-    else snprintf(cap, sizeof cap, "OFF - release   MENU in %u", (unsigned)v.holdSeconds);
+    else if (v.holdSeconds) snprintf(cap, sizeof cap, "OFF - release   MENU in %u", (unsigned)v.holdSeconds);
+    else snprintf(cap, sizeof cap, "OFF - release");            // menu.enabled false: no second stage
     widgets::textCentred(g, 0, SCR_W, 119, cap, 1, t.fg);
     widgets::hbar(g, 0, 129, SCR_W, 6, v.holdPct, t.fg, COL_GRID);
     return;

@@ -31,7 +31,7 @@ static AudioEngine* s_engine = nullptr;
 static const char* TAG = "app";
 
 const char* AppState::modeName() const {
-  switch (mode_) { case AppMode::Boot: return "BOOT"; case AppMode::Active: return "ACTIVE"; case AppMode::Dimmed: return "DIMMED"; default: return "FAULT"; }
+  switch (mode_) { case AppMode::Boot: return "BOOT"; case AppMode::Active: return "ACTIVE"; case AppMode::Dimmed: return "DIMMED"; case AppMode::Menu: return "MENU"; default: return "FAULT"; }
 }
 
 sb::ButtonDurations AppState::durations() const {
@@ -39,7 +39,7 @@ sb::ButtonDurations AppState::durations() const {
   d.attendantHoldMs = cfg_.levelChange.attendantHoldMs;
   d.bothTapMs = cfg_.levelChange.bothTapMs;
   d.offHoldMs = cfg_.power.offHoldMs;
-  d.menuHoldMs = cfg_.menu.holdMs;
+  d.menuHoldMs = cfg_.menu.enabled ? cfg_.menu.holdMs : 0;   // §14.1: menu.enabled false removes the command (the both-hold stops at OFF)
   return d;
 }
 
@@ -138,6 +138,7 @@ void AppState::begin(const BootInfo& bi) {
   if (wokeFromOff_) cmds_.suppressOffUntilRelease();           // §4.2 rule 3
   { RtcState& rs = rtc::get(); rs.level = level_; rs.volumePct = volume_.master(); rs.muted = volume_.muted(); rs.wokeFromOff = wokeFromOff_; rtc::commit(); }
   normalScreen_.view = &view_;
+  menu_.build();                                               // §14.3: the items from the descriptor table
   refreshView(R_ALL);
   LOG_I(TAG, "configuration loaded at +%lu ms; level 1", (unsigned long)millis());
   if (bi.kind == BootKind::SleepWake) LOG_I(TAG, "sleep-wake: level %u, %s%s", (unsigned)(level_ + 1), bi.wakeTouchGpio ? "touch wake" : "button wake", bi.rtcValid ? "" : " (RTC copy invalid: cold values)");
@@ -317,6 +318,11 @@ void AppState::handleEvent(const Event& e, uint32_t now) {
   switch (e.type) {
     case Ev::PadDown: {
       registerInput(now);
+      if (mode_ == AppMode::Menu) {                                // §14.4 (CP-9 layout): left half back / down, right half up (OK) / next; no sound plays
+        LOG_I(TAG, "PadDown P%u in the menu [press %u]", e.pad.pos + 1, e.pad.pressId);
+        menuKey(e.pad.pos == 0 ? MenuKey::Prev : e.pad.pos == 1 ? MenuKey::Down : e.pad.pos == 2 ? MenuKey::Up : MenuKey::Next, now);
+        break;
+      }
       padSinceWake_ = true;                                        // §3.2: a pad press ends the off-return rule
       const sb::Role role = e.pad.pos < 4 ? cfg_.pads.roles[e.pad.pos] : sb::Role::None;
       LOG_I(TAG, "PadDown P%u (ch%u) %+.1f%% [press %u]", e.pad.pos + 1, e.pad.ch, e.pad.delta / 10.0f, e.pad.pressId);
@@ -368,6 +374,15 @@ void AppState::handleEvent(const Event& e, uint32_t now) {
 
 void AppState::onButtonCommand(sb::ButtonCmd c, uint32_t now) {
   LOG_I(TAG, "command: %s", sb::buttonCmdName(c));
+  if (mode_ == AppMode::Menu) {                                  // §4.2 rule 5 / §14.4: the menu meanings
+    switch (c) {
+      case sb::ButtonCmd::VolumeDown: menuKey(MenuKey::Down, now); break;
+      case sb::ButtonCmd::VolumeUp:   menuKey(MenuKey::Up, now); break;
+      case sb::ButtonCmd::Off:        closeMenu(true, "both buttons held and released"); break;
+      default: break;
+    }
+    return;
+  }
   switch (c) {
     case sb::ButtonCmd::VolumeDown: stepVolume(-1, now, false); break;
     case sb::ButtonCmd::VolumeUp:   stepVolume(+1, now, false); break;
@@ -375,7 +390,7 @@ void AppState::onButtonCommand(sb::ButtonCmd c, uint32_t now) {
     case sb::ButtonCmd::PrevLevel:  applyLevel(levels_.prev(sb::LevelSource::Attendant), "long hold -", now); break;
     case sb::ButtonCmd::NextLevel:  applyLevel(levels_.next(sb::LevelSource::Attendant), "long hold +", now); break;
     case sb::ButtonCmd::Off:        enterOff("both buttons held and released"); break;
-    case sb::ButtonCmd::Menu:       LOG_I(TAG, "Quick Menu arrives with Phase 9"); break;
+    case sb::ButtonCmd::Menu:       openMenu("both buttons held"); break;
     default: break;
   }
 }
@@ -498,17 +513,23 @@ void AppState::levelPad(uint16_t pressId, uint32_t now, bool repeat) {
   }
 }
 
-void AppState::stepVolume(int dir, uint32_t now, bool confirmClick) {
-  bool wasMuted = volume_.muted();
-  volume_.step(dir);
+void AppState::volumeChanged(uint32_t now, bool popup) {
   if (playingPress_) audio_.setGain(volume_.gainFor(playingEntryVol_));        // §6.4 SetGain: live during the sound
   { RtcState& rs = rtc::get(); rs.volumePct = volume_.master(); rs.muted = false; rtc::commit(); }
   view_.volumePct = volume_.master(); view_.muted = false; display_.dirty(R_TOP);
-  snprintf(view_.overlay, sizeof view_.overlay, "VOL %u", (unsigned)volume_.master());
-  view_.overlayBar = true; view_.overlayPct = volume_.master();
-  overlayUntil_ = now + cfg_.display.volumePopupMs; if (!overlayUntil_) overlayUntil_ = 1;
-  display_.dirty(R_MAIN);
+  if (popup) {
+    snprintf(view_.overlay, sizeof view_.overlay, "VOL %u", (unsigned)volume_.master());
+    view_.overlayBar = true; view_.overlayPct = volume_.master();
+    overlayUntil_ = now + cfg_.display.volumePopupMs; if (!overlayUntil_) overlayUntil_ = 1;
+    display_.dirty(R_MAIN);
+  }
   volPersistAt_ = now + 2000; if (!volPersistAt_) volPersistAt_ = 1;             // §6.2: NVS once silent for 2 s (through the deferred write)
+}
+
+void AppState::stepVolume(int dir, uint32_t now, bool confirmClick) {
+  bool wasMuted = volume_.muted();
+  volume_.step(dir);
+  volumeChanged(now, true);
   LOG_I(TAG, "volume %u%%%s", (unsigned)volume_.master(), wasMuted ? " (un-muted)" : "");
   if (confirmClick) playCue(cfg_.audio.cues.click, sb::ToneKind::Click, volume_.volumeActionClickGain());   // §5.4: at the new master volume
   else if (wasMuted) playCue(cfg_.audio.cues.click, sb::ToneKind::Click, volume_.unmuteClickGain());       // §6.5: the un-mute click
@@ -543,8 +564,9 @@ void AppState::onBatterySample(uint32_t now) {
     LOG_W(TAG, "battery low: %u %% (%u mV)", (unsigned)battery_.percent(), (unsigned)battery_.millivolts());
     if (cfg_.audio.cues.lowBattery[0] && cache_.stateOf(cfg_.audio.cues.lowBattery) == S_CACHED) playCue(cfg_.audio.cues.lowBattery, sb::ToneKind::Click, volume_.clickGain());
   }
-  if (!battery_.usb() && battery_.percent() <= cfg_.power.shutdownPct && !emptyAt_ && (mode_ == AppMode::Active || mode_ == AppMode::Dimmed)) {
+  if (!battery_.usb() && battery_.percent() <= cfg_.power.shutdownPct && !emptyAt_ && (mode_ == AppMode::Active || mode_ == AppMode::Dimmed || mode_ == AppMode::Menu)) {
     LOG_E(TAG, "battery empty (%u %%, %u mV): OFF in 3 s", (unsigned)battery_.percent(), (unsigned)battery_.millivolts());
+    if (mode_ == AppMode::Menu) closeMenu(true, "battery empty");
     msgScreen_.text = "BATTERY EMPTY"; msgScreen_.sub = nullptr; msgScreen_.scale = 3;
     display_.setScreen(&msgScreen_);
     emptyAt_ = now + 3000; if (!emptyAt_) emptyAt_ = 1;
@@ -599,14 +621,16 @@ void AppState::playFile(const char* name) {
   Serial.printf("playing %s [request %u]\n", name, id);
 }
 
-bool AppState::toggleSpeakers() {
+bool AppState::setSpeakers(bool on) {
+  if (on == cfg_.audio.outputs.speakers) return true;
   char err[64];
-  bool on = !cfg_.audio.outputs.speakers;
   if (!setSetting("audio.outputs.speakers", on ? "true" : "false", err, sizeof err)) { LOG_W(TAG, "speakers: %s", err); return false; }
   if (!on) ampEnable(false);
-  LOG_I(TAG, "on-board speakers %s (RAM; `save` keeps it)", on ? "ON" : "off");
-  return on;
+  LOG_I(TAG, "on-board speakers %s (RAM; `save` or the menu exit keeps it)", on ? "ON" : "off");
+  return true;
 }
+
+bool AppState::toggleSpeakers() { setSpeakers(!cfg_.audio.outputs.speakers); return cfg_.audio.outputs.speakers; }
 
 bool AppState::toggleKeyboard() {
   char err[64];
@@ -630,9 +654,11 @@ void AppState::updateStateWord(uint32_t now) {                // §11.4 priority
   if (strcmp(w, view_.stateWord)) { sb::copyStr(view_.stateWord, sizeof view_.stateWord, w); display_.dirty(R_BOTTOM); }
 }
 
-bool AppState::toggleBluetooth() {
+bool AppState::toggleBluetooth() { setBluetooth(!cfg_.bluetoothSpeaker.enabled); return cfg_.bluetoothSpeaker.enabled; }
+
+bool AppState::setBluetooth(bool on) {
+  if (on == cfg_.bluetoothSpeaker.enabled) return true;
   char err[64];
-  bool on = !cfg_.bluetoothSpeaker.enabled;
   if (!setSetting("bluetoothSpeaker.enabled", on ? "true" : "false", err, sizeof err)) { LOG_W(TAG, "bluetooth: %s", err); return false; }
   uint32_t now = millis();
   if (on) {
@@ -650,7 +676,7 @@ bool AppState::toggleBluetooth() {
     setFault(F_BT, false);
   }
   updateStateWord(now);
-  return on;
+  return true;
 }
 
 bool AppState::startPairing(bool wipe) {                       // §7.3
@@ -705,6 +731,7 @@ void AppState::tickBluetooth(uint32_t now) {                   // §7
       if (strcmp(view_.link, "BT SPEAKER LINKED")) linkMessage("BT SPEAKER LINKED", 4000, now);   // usually the link edge above said it already
       playCue(cfg_.audio.cues.saved, sb::ToneKind::Saved, volume_.clickGain());                    // the module has saved it; the cue confirms
     } else linkMessage("NO BT SPEAKER FOUND", 5000, now);           // the menu/portal then offer forget-and-pair (§7.3 step 4)
+    if (mode_ == AppMode::Menu) menuPairResult(p == KcxLink::Pair::Connected, now);
   }
 }
 
@@ -753,7 +780,7 @@ void AppState::simulateClick(int dir) { simulateCommand(dir < 0 ? sb::ButtonCmd:
 void AppState::recalibrate() {
   if (touch_.failed()) { Serial.println("touch driver is down"); return; }
   touch_.calibrate();
-  if (mode_ == AppMode::Active || mode_ == AppMode::Dimmed) {
+  if (mode_ == AppMode::Active || mode_ == AppMode::Dimmed || mode_ == AppMode::Menu) {
     bootScreen_.calibrationHint = true; bootScreen_.recoveryPrompt = false;
     display_.setScreen(&bootScreen_);
     hintShown_ = true;
@@ -766,7 +793,7 @@ void AppState::recalibrate() {
 bool AppState::cardRecover(uint32_t offMs) {
   LOG_W(TAG, "card recovery: gated rail off for %lu ms", (unsigned long)offMs);
   store_.unmountCard();
-  Screen* current = mode_ == AppMode::Active ? (Screen*)&normalScreen_ : mode_ == AppMode::Boot ? (Screen*)&bootScreen_ : (Screen*)&faultScreen_;
+  Screen* current = mode_ == AppMode::Active || mode_ == AppMode::Dimmed ? (Screen*)&normalScreen_ : mode_ == AppMode::Menu ? (Screen*)&menuScreen_ : mode_ == AppMode::Boot ? (Screen*)&bootScreen_ : (Screen*)&faultScreen_;
   display_.powerDown();
   Board::gatedRail(false);
   uint32_t t0 = millis();
@@ -1052,10 +1079,12 @@ void AppState::tick() {
   // Inputs: pads every 15 ms, buttons every tick; the command engine runs once ACTIVE (§17.2 K).
   touch_.tick(now);
   buttons_.tick(now);
-  if (mode_ == AppMode::Active || mode_ == AppMode::Dimmed) {
+  if (mode_ == AppMode::Active || mode_ == AppMode::Dimmed || mode_ == AppMode::Menu) {
     sb::ButtonCmd c = cmds_.feed(now, buttons_.minusDown(), buttons_.plusDown());
     if (c != sb::ButtonCmd::None) { Event e = { Ev::ButtonCommand, now, {} }; e.command.id = (uint8_t)c; EventBus::post(e); }
-    updateHoldBar(now);
+    if (mode_ != AppMode::Menu) updateHoldBar(now);              // the menu screen draws its own bars (tickMenu)
+  }
+  if (mode_ == AppMode::Active || mode_ == AppMode::Dimmed) {
     if (touch_.wakePending() && touch_.wakeReadable() && railReady_) touch_.consumeWake(now);   // §4.1: the latched wake press, once the rail is ready
     press_.tick(now);                                            // §5.2 step 7 / §5.3 step 7: repeats while held
     sb::LevelChange back = levels_.tickReturnTimer(now);         // §5.3: return to level 1
@@ -1089,6 +1118,9 @@ void AppState::tick() {
       break;     // Phase 5: sleep/off
     case AppMode::Dimmed:
       if (hintShown_ && !touch_.calibrating()) { hintShown_ = false; bootScreen_.calibrationHint = false; display_.setScreen(&normalScreen_); }
+      break;
+    case AppMode::Menu:                                          // §14: keys and bars are handled above and in the events; sleep and dim are blocked here
+      tickMenu(now);
       break;
     case AppMode::Fault:
       break;
@@ -1179,6 +1211,11 @@ void AppState::printStatus(Print& out) {
   out.printf("OTA: running %s, state %s | uptime %lu s | boots %lu | crashes %u | reset %d | last input %lu s ago\n",
              run ? run->label : "?", otaStateName(run), (unsigned long)(millis() / 1000), (unsigned long)rtc::get().bootCount,
              (unsigned)rtc::get().crashCount, (int)bi_.reset, (unsigned long)((millis() - lastInputMs_) / 1000));
+  out.printf("menu: %s | %u items | hold both %u ms (%s) | timeout %u s%s\n", mode_ == AppMode::Menu ? "OPEN" : "closed", (unsigned)menu_.count(),
+             (unsigned)cfg_.menu.holdMs, cfg_.menu.enabled ? "enabled" : "menu.enabled false", (unsigned)cfg_.menu.timeoutS,
+             menu_.changed(cfg_) && mode_ == AppMode::Menu ? " | changes pending" : "");
+  if (mode_ == AppMode::Menu) out.printf("  item %u/%u \"%s\" = \"%s\"%s%s | key %lu s ago\n", (unsigned)(menu_.index() + 1), (unsigned)menu_.count(), menuView_.label, menuView_.value,
+                                         menuView_.result[0] ? " result " : "", menuView_.result, (unsigned long)((millis() - menuLastKeyAt_) / 1000));
   out.printf("buttons: - %s, + %s | commands %s | dim after %u s (%s) | last input %lu s ago\n",
              buttons_.minusDown() ? "DOWN" : "up", buttons_.plusDown() ? "DOWN" : "up", cmds_.enabled() ? "enabled" : "not yet",
              (unsigned)cfg_.display.dimAfterS, cfg_.display.dimAfterS ? "on" : "off", (unsigned long)((millis() - lastInputMs_) / 1000));

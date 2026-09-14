@@ -17,7 +17,7 @@ struct ButtonDurations {
   uint16_t attendantHoldMs = 1000;   // levelChange.attendantHoldMs
   uint16_t bothTapMs       = 400;    // levelChange.bothTapMs: both pressed and released within this = level 1
   uint16_t offHoldMs       = 1000;   // power.offHoldMs
-  uint16_t menuHoldMs      = 3000;   // menu.holdMs
+  uint16_t menuHoldMs      = 3000;   // menu.holdMs; 0 = no menu (menu.enabled false): the both-hold stops at OFF
 };
 
 // What the countdown bar shows. For a single-button hold the bar fills toward
@@ -42,8 +42,11 @@ class ButtonCommands {
   // §4.2 rule 3: after an OFF wake the both-hold cannot produce Off until both
   // buttons have been released once; Menu stays reachable.
   void suppressOffUntilRelease() { suppressOff_ = true; }
-  // §4.2 rule 5: in MENU the both-hold exits the menu; clicks resolve on release everywhere (Draft 4).
+  // §4.2 rule 5 / §14.4: in MENU every single-button press is a click on its release (no long holds),
+  // there is no both tap and no stage 2: the both-hold released after offHoldMs fires Off, which the
+  // app reads as "exit and save".
   void setMenuMode(bool on) { menuMode_ = on; }
+  bool menuMode() const { return menuMode_; }
 
   // Feed the debounced states every tick. Returns the command that resolved on
   // this tick, or None.
