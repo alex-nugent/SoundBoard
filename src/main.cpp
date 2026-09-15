@@ -116,6 +116,9 @@ void setup() {
   app.audioEarlyStart();
 
   app.begin(bootInfo);
+#if defined(CRASH_TEST) && CRASH_TEST == 1
+  LOG_E("boot", "CRASH_TEST 1: aborting in setup()"); Serial.flush(); delay(50); abort();   // CP-11: the bootloader rolls back
+#endif
 
   // §19.1: the app task subscribes to the 5 s task watchdog and feeds it every iteration.
   esp_err_t w = esp_task_wdt_add(NULL);
@@ -125,6 +128,9 @@ void setup() {
 
 void loop() {
   uint32_t t0 = millis();
+#if defined(CRASH_TEST) && CRASH_TEST == 2
+  if (t0 >= 20000) { LOG_E("boot", "CRASH_TEST 2: aborting 20 s in"); Serial.flush(); delay(50); abort(); }   // CP-11: the 90 s health check must not have passed
+#endif
   esp_task_wdt_reset();
   app.tick();
   uint32_t spent = millis() - t0;

@@ -84,7 +84,7 @@ bool BleKeyboard::begin(const sb::Config& cfg) {
   s_self = this;
   strlcpy(name_, cfg.device.name[0] ? cfg.device.name : "SoundBoard V4", sizeof name_);
   cfgEnabled_ = cfg.keyboard.enabled;
-  enabled_ = cfgEnabled_ && !paused_;
+  enabled_ = cfgEnabled_ && !paused_ && !suspended_;
   m_.configure(cfg.keyboard.typeDelayMs, cfg.keyboard.holdKeysMaxMs);
   m_.setKeymap(keymapLookup);
   uint32_t t0 = millis();
@@ -141,8 +141,20 @@ void BleKeyboard::setPaused(bool on) {                        // §8.5
   applyEnable();
 }
 
+void BleKeyboard::stopStack() {
+  if (!init_) return;
+  releaseAll("ble off", millis());
+  if (connected_) { disconnectHost(); delay(30); }
+  stopAdvertising();
+  BLEDevice::deinit(false);
+  init_ = false; enabled_ = false;
+  LOG_W(TAG, "BLE stack stopped until the next boot | heap free %lu", (unsigned long)ESP.getFreeHeap());
+}
+
+void BleKeyboard::setSuspended(bool on) { if (on == suspended_) return; suspended_ = on; applyEnable(); }
+
 void BleKeyboard::applyEnable() {
-  bool en = cfgEnabled_ && !paused_;
+  bool en = cfgEnabled_ && !paused_ && !suspended_;
   if (en == enabled_) return;
   enabled_ = en;
   if (!init_) return;

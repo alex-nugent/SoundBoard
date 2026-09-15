@@ -31,7 +31,7 @@ static AudioEngine* s_engine = nullptr;
 static const char* TAG = "app";
 
 const char* AppState::modeName() const {
-  switch (mode_) { case AppMode::Boot: return "BOOT"; case AppMode::Active: return "ACTIVE"; case AppMode::Dimmed: return "DIMMED"; case AppMode::Menu: return "MENU"; default: return "FAULT"; }
+  switch (mode_) { case AppMode::Boot: return "BOOT"; case AppMode::Active: return "ACTIVE"; case AppMode::Dimmed: return "DIMMED"; case AppMode::Menu: return "MENU"; case AppMode::Updating: return "UPDATING"; default: return "FAULT"; }
 }
 
 sb::ButtonDurations AppState::durations() const {
@@ -139,6 +139,18 @@ void AppState::begin(const BootInfo& bi) {
   { RtcState& rs = rtc::get(); rs.level = level_; rs.volumePct = volume_.master(); rs.muted = volume_.muted(); rs.wokeFromOff = wokeFromOff_; rtc::commit(); }
   normalScreen_.view = &view_;
   menu_.build();                                               // §14.3: the items from the descriptor table
+  updater_.begin(*this, portal_);
+  {                                                            // §16: the one-shot flag from an install or rollback, and what the boot record says happened
+    Preferences p;
+    if (p.begin("sb-state", false)) { resumeSetup_ = p.getUChar("resumeSetup", 0) != 0; if (resumeSetup_) p.remove("resumeSetup"); p.end(); }
+    const esp_partition_t* other = esp_ota_get_next_update_partition(nullptr);
+    esp_ota_img_states_t ost; bool otherBad = other && esp_ota_get_state_partition(other, &ost) == ESP_OK && (ost == ESP_OTA_IMG_INVALID || ost == ESP_OTA_IMG_ABORTED);
+    const esp_partition_t* run = esp_ota_get_running_partition(); esp_ota_img_states_t rst;
+    bool pending = run && esp_ota_get_state_partition(run, &rst) == ESP_OK && rst == ESP_OTA_IMG_PENDING_VERIFY;
+    if (resumeSetup_ && otherBad && !pending) { rolledBack_ = true; LOG_E(TAG, "update failed, previous version restored (%s runs, the other slot is marked bad)", FW_VERSION); message("update failed, previous version restored", 8000); }
+    else if (pending) LOG_W(TAG, "this image (%s) is pending: valid after the health check of §16, else rolled back at 90 s", FW_VERSION);
+    if (resumeSetup_) LOG_I(TAG, "SETUP resumes once ACTIVE (an update or rollback asked for it)");
+  }
   refreshView(R_ALL);
   LOG_I(TAG, "configuration loaded at +%lu ms; level 1", (unsigned long)millis());
   if (bi.kind == BootKind::SleepWake) LOG_I(TAG, "sleep-wake: level %u, %s%s", (unsigned)(level_ + 1), bi.wakeTouchGpio ? "touch wake" : "button wake", bi.rtcValid ? "" : " (RTC copy invalid: cold values)");
@@ -161,6 +173,9 @@ void AppState::enterActive(uint32_t now) {
   if (recoveryRequested_ && !setupOn_) {                       // §17.2: recovery starts SETUP with the current password on the card
     startupCuePending_ = false;
     startSetup("recovery (both buttons held through the reset)", true);
+  } else if (resumeSetup_ && !setupOn_) {                      // §16: the page reconnects and sees the result
+    resumeSetup_ = false;
+    startSetup("after an update or rollback", false);
   }
 }
 
@@ -321,6 +336,7 @@ bool AppState::factory(char* err, size_t errLen) {
 void AppState::handleEvent(const Event& e, uint32_t now) {
   switch (e.type) {
     case Ev::PadDown: {
+      if (mode_ == AppMode::Updating) break;                       // §16: pads ignored
       registerInput(now);
       if (setupCardShown_) hideSetupCard(now);                     // §15.2: the card gives way to the normal view for 10 s
       if (mode_ == AppMode::Menu) {                                // §14.4 (CP-9 layout): left half back / down, right half up (OK) / next; no sound plays
@@ -1131,11 +1147,15 @@ void AppState::tick() {
     case AppMode::Menu:                                          // §14: keys and bars are handled above and in the events; sleep and dim are blocked here
       tickMenu(now);
       break;
+    case AppMode::Updating:                                      // §16: pads and commands ignored, the progress screen follows the job
+      tickUpdating(now);
+      break;
     case AppMode::Fault:
       break;
   }
   tickOverlays(now);
   tickSetup(now);                                              // §15: the portal's calls on the app task, its timers and card
+  if (!portal_.running()) updater_.tickApp();                  // §16: a job while SETUP is off gets its own task; the net task runs the steps while SETUP is on
 
   if (due(now, next1s_)) { next1s_ = now + 1000; tick1s(now); }
   display_.tick(now);
@@ -1156,18 +1176,7 @@ void AppState::tick1s(uint32_t now) {
   if (liveDeltas_) touch_.printLive(Serial);
   if (view_.usb != Board::usbPresent()) { view_.usb = Board::usbPresent(); display_.dirty(R_TOP); }
 
-  // §16 health check, minimal form: a pending OTA image is marked valid once the
-  // screen is up, the configuration is loaded and 30 s have passed. Phase 11
-  // adds the pads/audio criteria and the 90 s rollback.
-  if (!otaMarked_ && mode_ == AppMode::Active && now >= 30000) {
-    otaMarked_ = true;
-    const esp_partition_t* run = esp_ota_get_running_partition();
-    esp_ota_img_states_t st;
-    if (run && esp_ota_get_state_partition(run, &st) == ESP_OK && st == ESP_OTA_IMG_PENDING_VERIFY) {
-      esp_ota_mark_app_valid_cancel_rollback();
-      LOG_I(TAG, "OTA image marked valid (health check passed)");
-    }
-  }
+  healthCheck(now);                                            // §16
   // §18: five minutes of uptime clears the crash window.
   if (rtc::get().crashCount && now >= 5UL * 60UL * 1000UL) { rtc::clearCrashes(); LOG_I(TAG, "crash counter cleared after 5 min of uptime"); }
 }
@@ -1225,6 +1234,7 @@ void AppState::printStatus(Print& out) {
                            setupRecovery_ ? " (recovery)" : "", portal_.ssid(), cfg_.setup.password, portal_.ip(), (unsigned)portal_.clients(), (unsigned long)portal_.requests(),
                            (unsigned long)((millis() - portal_.lastInputRequestMs()) / 1000), (unsigned)cfg_.setup.idleOffMin, (unsigned long)portal_.netStackMin());
   else out.printf("setup: off | menu item or `w` starts it | password \"%s\" | idle off after %u min%s\n", cfg_.setup.password, (unsigned)cfg_.setup.idleOffMin, cfg_.setup.pauseKeyboard ? " | keyboard paused during setup" : "");
+  updater_.printStatus(out);
   out.printf("menu: %s | %u items | hold both %u ms (%s) | timeout %u s%s\n", mode_ == AppMode::Menu ? "OPEN" : "closed", (unsigned)menu_.count(),
              (unsigned)cfg_.menu.holdMs, cfg_.menu.enabled ? "enabled" : "menu.enabled false", (unsigned)cfg_.menu.timeoutS,
              menu_.changed(cfg_) && mode_ == AppMode::Menu ? " | changes pending" : "");

@@ -27,6 +27,8 @@ class BleKeyboard {
   void releaseAll(const char* why, uint32_t now);
   void forget();                                // §8.6: disconnect, ble_store_clear(), advertise again
   void setPaused(bool on);                      // §8.5 setup.pauseKeyboard: off for the duration of SETUP, back after
+  void setSuspended(bool on);                   // §16 UPDATING: host dropped, advertising stopped; back if the update fails
+  void stopStack();                             // bench (`bleoff`): NimBLE deinitialised until the next boot, to measure its share of the radio
   void shutdown(uint32_t now);                  // SLEEP / OFF: keys up, host disconnected, advertising stopped
 
   // Bench (console `kbdtype`, `kbdkey`).
@@ -62,7 +64,7 @@ class BleKeyboard {
   BLEHIDDevice*       hid_ = nullptr;
   BLECharacteristic*  inKbd_ = nullptr;
   BLECharacteristic*  inMedia_ = nullptr;
-  bool     init_ = false, enabled_ = true, cfgEnabled_ = true, paused_ = false, advertising_ = false, ready_ = false, securityAsked_ = false, memoryFull_ = false, refusing_ = false;
+  bool     init_ = false, enabled_ = true, cfgEnabled_ = true, paused_ = false, suspended_ = false, advertising_ = false, ready_ = false, securityAsked_ = false, memoryFull_ = false, refusing_ = false;
   volatile bool     connected_ = false, subscribed_ = false, connEvent_ = false, discEvent_ = false;
   volatile uint16_t connHandle_ = 0xFFFF;
   volatile uint32_t undelivered_ = 0;

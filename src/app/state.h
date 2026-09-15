@@ -30,6 +30,7 @@
 #include "app/levels.h"
 #include "app/menu_model.h"
 #include "net/portal.h"
+#include "net/ota.h"
 
 enum class BootKind : uint8_t { Cold, SleepWake, OffWake };
 
@@ -46,7 +47,7 @@ struct BootInfo {
   uint8_t  wakeButtons = 0;              // an ext1 wake: bit 0 minus, bit 1 plus
 };
 
-enum class AppMode : uint8_t { Boot, Active, Dimmed, Menu, Fault };
+enum class AppMode : uint8_t { Boot, Active, Dimmed, Menu, Updating, Fault };
 
 class AppState : private PressHost {
  public:
@@ -114,6 +115,11 @@ class AppState : private PressHost {
   bool portalSoundRename(const char* name, const char* to, char* err, size_t errLen);
   void rescanSounds();                               // after an upload, delete or rename: the cache table from the card again
 
+  // §16: updates (app/update.cpp). The Updater runs its steps on the net task (or the app task for the console).
+  Updater& updater() { return updater_; }
+  void enterUpdating(const char* what);              // the quiesce of §12.3 without the AP: rail down, pads ignored, keyboard suspended, progress screen
+  void leaveUpdating(const char* why);               // a failed or cancelled job: rail up, back to ACTIVE, the reason on the bottom line
+
   uint16_t faults() const { return faults_; }
   void setFault(uint16_t bit, bool on);
   void message(const char* text, uint32_t ms);
@@ -177,6 +183,8 @@ class AppState : private PressHost {
   void showSetupCard(uint32_t now);
   void showHome();                                                 // the normal view, or the setup card while it is due
   void hideSetupCard(uint32_t now);                                // a pad or button: the card gives way for 10 s
+  void tickUpdating(uint32_t now);                                 // §16: the progress screen from the job state
+  void healthCheck(uint32_t now);                                  // §16: mark the image valid, or roll back at 90 s
   void    playSound(const char* sound, uint8_t volumePct, uint16_t pressId, uint32_t now, bool repeat) override;
   void    runAction(const sb::Entry& e, uint16_t pressId, uint32_t now) override;
   void    levelPad(uint16_t pressId, uint32_t now, bool repeat) override;
@@ -242,6 +250,12 @@ class AppState : private PressHost {
   uint32_t         setupCardAt_ = 0, setupTickAt_ = 0;
   uint16_t         identSeq_ = 0;              // every PadDown: the channel and position, for the page's Identify pads (§15.3)
   uint8_t          identCh_ = 0, identPos_ = 0;
+  // §16: updates.
+  Updater          updater_;
+  UpdateView       updateView_;
+  UpdateScreen     updateScreen_;
+  uint32_t         updateTickAt_ = 0;
+  bool             resumeSetup_ = false, rolledBack_ = false;
   bool             wokeFromOff_ = false, padSinceWake_ = false, lowWarned_ = false;
   uint32_t         emptyAt_ = 0;
   uint8_t          level_ = 0;                 // mirrors levels_.current()

@@ -170,6 +170,7 @@ async function init() {
   await loadStatus();
   S.statusTimer = setInterval(loadStatus, 5000);
   loadFirmware();
+  setInterval(() => { if (!(S.fw && FW_BUSY.includes(S.fw.job))) loadFirmware(); }, 15000);
   if ('IntersectionObserver' in window) {
     const io = new IntersectionObserver(es => es.forEach(en => { if (en.isIntersecting) startDiag(); else stopDiag(); }), { threshold: 0.05 });
     io.observe($('#diag'));
@@ -273,9 +274,84 @@ function renderStatus() {
   $$('.level').forEach((lv, i) => lv.classList.toggle('current', i === st.level.index - 1));
 }
 function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
+// ---- Firmware (§16) ---------------------------------------------------------------
+const FW_BUSY = ['connecting', 'checking', 'downloading', 'verifying', 'writing', 'rebooting'];
 async function loadFirmware() {
-  try { const f = await api('/api/firmware/status'); $('#fwStatus').innerHTML = 'Running <b>' + esc(f.version) + '</b> from slot ' + esc(f.slot) + ' (' + esc(f.state) + ')' + (f.usb ? ', USB power present.' : ', no USB power.'); }
-  catch (e) { $('#fwStatus').textContent = e.message; }
+  let f;
+  try { f = await api('/api/firmware/status'); } catch (e) { $('#fwStatus').textContent = e.message; return; }
+  S.fw = f;
+  $('#fwStatus').innerHTML = 'Running <b>' + esc(f.version) + '</b> from slot ' + esc(f.slot) + ' (' + esc(f.state) + ').' +
+    (f.other && f.other.present ? ' The other slot holds <b>' + esc(f.other.version || '?') + '</b> (' + esc(f.other.state) + ').' : '') +
+    ' Releases from <b>' + esc(f.repo) + '</b>, ' + esc(f.channel) + '.';
+  $('#staStatus').textContent = f.sta.connected ? 'joined ' + f.sta.ssid + ' (' + f.sta.ip + ', ' + f.sta.rssi + ' dBm)' : f.sta.configured ? 'not joined yet' : 'no network set';
+  const busy = FW_BUSY.includes(f.job);
+  $('#fwJob').innerHTML = f.job === 'idle' ? '' : (f.job === 'failed' ? '<b>Failed:</b> ' + esc(f.error) : esc(f.text || f.job));
+  $('#fwBarBox').hidden = !(f.job === 'downloading' || f.job === 'writing' || f.job === 'rebooting');
+  $('#fwBar').style.width = f.pct + '%';
+  $('#btnFwCancel').hidden = !busy || f.job === 'rebooting' || f.job === 'writing';
+  const a = f.available;
+  $('#fwAvail').innerHTML = a ? '<b>' + esc(a.version) + '</b>' + (a.same ? ' is what the board runs.' : ' is available (' + kb(a.size) + ').') + (a.notes ? ' ' + esc(a.notes) : '') : '';
+  $('#btnFwInstall').hidden = !(a && !busy);
+  $('#btnFwInstall').textContent = a ? 'Install ' + a.version : 'Install';
+  $('#fwGate').textContent = f.usb ? '' : 'Plug in USB power first: installing needs it.';
+  ['btnFwInstall', 'btnFwInstallVer', 'btnFwUpload', 'btnFwRollback'].forEach(id => { $('#' + id).disabled = !f.usb || busy; });
+  $('#btnFwCheck').disabled = busy; $('#btnWifiJoin').disabled = busy && f.job !== 'connecting'; $('#btnWifiScan').disabled = busy;
+  if (!(f.other && f.other.eligible)) $('#btnFwRollback').disabled = true;
+  $('#btnFwRollback').textContent = f.other && f.other.present ? 'Go back to ' + (f.other.version || 'the other slot') : 'Go back to the previous version';
+  if (f.job === 'rebooting') { waitForReboot(f.text); return; }
+  clearTimeout(S.fwTimer);
+  if (busy) S.fwTimer = setTimeout(loadFirmware, 1000);
+}
+function waitForReboot(text) {
+  clearTimeout(S.fwTimer); clearInterval(S.statusTimer); S.statusTimer = null;
+  $('#fwJob').innerHTML = '<b>' + esc(text || 'restarting') + '.</b> Stay on the board\'s Wi-Fi; this page reloads when the board is back (about 20 s).';
+  const t0 = Date.now();
+  const poll = async () => {
+    if (Date.now() - t0 > 120000) { $('#fwJob').innerHTML = 'The board has not come back on this network. Rejoin it and reload the page.'; return; }
+    try { const r = await fetch('/api/status', { cache: 'no-store' }); if (r.ok) { location.reload(); return; } } catch (e) { }
+    setTimeout(poll, 3000);
+  };
+  setTimeout(poll, 8000);
+}
+async function fwPost(path, args, okText) {
+  try { await post(path, args || {}); if (okText) toast(okText); await loadFirmware(); } catch (e) { toast(e.message, 'err'); loadFirmware(); }
+}
+function bindFirmware() {
+  $('#btnWifiScan').onclick = async () => {
+    $('#btnWifiScan').disabled = true; $('#wifiList').innerHTML = '<div class="muted">scanning…</div>';
+    try {
+      const r = await post('/api/firmware/wifi/scan', {});
+      const box = $('#wifiList'); box.innerHTML = '';
+      (r.networks || []).sort((a, b) => b.rssi - a.rssi).forEach(n => box.appendChild(el('div', { class: 'item' }, [
+        el('span', { class: 'n', text: n.ssid }), el('span', { class: 'muted', text: n.rssi + ' dBm' + (n.open ? ', open' : '') }),
+        el('button', { class: 'ghost small', text: 'Use', onclick: () => { const i = $$('#firmware .row input').find(x => x.previousSibling && /Home Wi-Fi network/.test(x.parentNode.textContent)); if (i) { i.value = n.ssid; i.dispatchEvent(new Event('change')); } box.innerHTML = ''; } })
+      ])));
+      if (!r.networks || !r.networks.length) box.innerHTML = '<div class="muted">no 2.4 GHz networks found</div>';
+    } catch (e) { toast(e.message, 'err'); $('#wifiList').innerHTML = ''; }
+    $('#btnWifiScan').disabled = false;
+  };
+  $('#btnWifiJoin').onclick = () => {
+    const ssid = (getPath(S.draft, 'wifi.ssid') || '').trim(), pw = getPath(S.draft, 'wifi.password') || '';
+    if (!ssid) { toast('Type the home Wi-Fi network name first', 'err'); return; }
+    if (patch().n) toast('Save keeps the network for next time');
+    fwPost('/api/firmware/wifi/join', { ssid: ssid, password: pw }, 'Joining ' + ssid + ' …');
+  };
+  $('#btnFwCheck').onclick = () => fwPost('/api/firmware/check', {}, 'Checking …');
+  $('#btnFwInstall').onclick = () => { const a = S.fw && S.fw.available; if (a && confirm('Install ' + a.version + '? The board restarts when it is written; sounds stop meanwhile.')) fwPost('/api/firmware/install', { version: a.version }); };
+  $('#btnFwInstallVer').onclick = () => { const v = $('#fwVersion').value.trim(); if (!v) { toast('Type a version like v0.11.0'); return; } if (confirm('Install ' + v + '?')) fwPost('/api/firmware/install', { version: v }); };
+  $('#btnFwCancel').onclick = () => fwPost('/api/firmware/cancel', {}, 'Cancelled');
+  $('#btnFwRollback').onclick = () => { if (confirm('Go back to the other slot\'s firmware? The board restarts.')) fwPost('/api/firmware/rollback', {}); };
+  $('#btnFwUpload').onclick = () => {
+    const f = $('#fwFile').files[0]; if (!f) { toast('Choose a .bin first'); return; }
+    if (!confirm('Install ' + f.name + ' (' + kb(f.size) + ')? The board restarts when it is written.')) return;
+    const fd = new FormData(); fd.append('file', f, f.name);
+    const xhr = new XMLHttpRequest(); xhr.open('POST', '/api/firmware/upload');
+    $('#fwBarBox').hidden = false; $('#fwJob').textContent = 'sending ' + f.name + ' …';
+    xhr.upload.onprogress = e => { if (e.lengthComputable) $('#fwBar').style.width = Math.round(e.loaded * 100 / e.total) + '%'; };
+    xhr.onload = () => { let r = null; try { r = JSON.parse(xhr.responseText); } catch (e) { } if (xhr.status === 200) loadFirmware(); else { toast('Not installed: ' + ((r && r.error) || ('HTTP ' + xhr.status)), 'err'); loadFirmware(); } };
+    xhr.onerror = () => { toast('Upload failed (connection lost?)', 'err'); loadFirmware(); };
+    xhr.send(fd);
+  };
 }
 
 // ---- Levels ---------------------------------------------------------------
@@ -578,6 +654,7 @@ function bindStatic() {
   $('#btnBattK').onclick = () => { const v = Number($('#battVolts').value); if (!(v >= 3 && v <= 4.5)) { toast('A meter reading between 3 and 4.5 V', 'err'); return; } action('setBatteryK', { volts: v }).then(pollDiag); };
   $('#btnBattClear').onclick = () => { if (confirm('Use the design divider instead of the calibrated K?')) action('setBatteryK', { volts: 0 }).then(pollDiag); };
   $('#btnLog').onclick = loadLog;
+  bindFirmware();
   loadLog();
 }
 document.addEventListener('DOMContentLoaded', init);

@@ -52,6 +52,7 @@ CFG.setdefault("keyboard", {"enabled": True})
 SOUNDS = [{"name": n, "bytes": 88200 * k, "rate": 44100, "channels": 1, "seconds": round(k, 2), "state": "cached", "reason": "", "usedBy": []}
           for n, k in [("yes.wav", 0.6), ("no.wav", 0.5), ("maybe.wav", 0.8), ("_click.wav", 0.05), ("_saved.wav", 0.3), ("hello.wav", 1.2), ("music.wav", 12.4)]]
 SOUNDS.append({"name": "broken.wav", "bytes": 1000, "rate": 0, "channels": 0, "seconds": 0, "state": "bad", "reason": "NotPcm", "usedBy": []})
+FW = {"job": "idle", "pct": 0, "error": "", "text": "", "available": None, "sta": False, "t0": 0, "kind": ""}
 STATE = {"level": 1, "volume": 60, "muted": False, "pairing": "none", "pairUntil": 0, "padSeq": 0, "padCh": 0, "padPos": 0, "recovery": "--recovery" in sys.argv, "lastInput": time.time(), "started": time.time()}
 LOCK = threading.Lock()
 
@@ -141,7 +142,20 @@ class H(BaseHTTPRequestHandler):
             if u.path == "/api/sounds": used_by(); return self.send(200, {"cardMounted": True, "count": len(SOUNDS), "loader": False, "sounds": SOUNDS})
             if u.path == "/api/log": return self.send(200, "\n".join("[%9d] I app     mock log line %d" % (i * 1000, i) for i in range(int(q.get("tail", "50")))), "text/plain")
             if u.path == "/api/coredump": return self.send(404, {"error": "no crash dump in flash"})
-            if u.path == "/api/firmware/status": return self.send(200, {"version": SCHEMA["version"], "slot": "app0", "state": "flashed over USB", "usb": True, "job": "idle"})
+            if u.path == "/api/firmware/status":
+                dt = time.time() - FW["t0"]
+                if FW["job"] == "connecting" and dt > 2: FW["job"] = "checking" if FW["kind"] else "done"; FW["sta"] = True; FW["text"] = "checking for updates" if FW["kind"] else "joined HomeNet"; FW["t0"] = time.time()
+                elif FW["job"] == "checking" and dt > 2:
+                    FW["available"] = {"version": "v0.11.0", "size": 1657584, "notes": "Mock release notes.", "schema": 1, "minSchema": 1, "same": False}
+                    if FW["kind"] == "install": FW["job"] = "downloading"; FW["text"] = "downloading v0.11.0"; FW["t0"] = time.time()
+                    else: FW["job"] = "done"; FW["text"] = "v0.11.0 is available"
+                elif FW["job"] == "downloading":
+                    FW["pct"] = min(100, int(dt * 20)); FW["text"] = "downloading v0.11.0 %d %%" % FW["pct"]
+                    if FW["pct"] >= 100: FW["job"] = "rebooting"; FW["text"] = "restarting with v0.11.0"
+                return self.send(200, {"version": SCHEMA["version"], "slot": "app0", "state": "flashed over USB", "other": {"present": True, "version": "v0.9.0", "state": "valid", "eligible": True},
+                                       "usb": True, "job": FW["job"], "pct": FW["pct"], "error": FW["error"], "text": FW["text"],
+                                       "sta": {"connected": FW["sta"], "ssid": "HomeNet", "ip": "192.168.1.42" if FW["sta"] else "", "rssi": -61, "configured": True},
+                                       "available": FW["available"], "repo": "alex-nugent/SoundBoard", "channel": "latest", "schema": 1, "heap": 60000})
         self.send(404, {"error": "no such endpoint"})
     def do_PUT(self): self.do_POST()
     def do_POST(self):
@@ -182,6 +196,14 @@ class H(BaseHTTPRequestHandler):
                         if b.get("sound", "").lower() == n.lower(): b["sound"] = to
                 return self.send(200, {"ok": True})
             if u.path == "/api/play": return self.send(200, {"ok": True})
+            if u.path == "/api/firmware/wifi/scan": return self.send(200, {"networks": [{"ssid": "HomeNet", "rssi": -61, "open": False}, {"ssid": "Neighbour", "rssi": -80, "open": False}]})
+            if u.path == "/api/firmware/wifi/join": FW.update(job="connecting", kind="", text="joining " + f.get("ssid", ""), t0=time.time(), error=""); return self.send(200, {"ok": True, "job": "connecting"})
+            if u.path in ("/api/firmware/check", "/api/firmware/install"):
+                FW.update(job="connecting" if not FW["sta"] else "checking", kind="install" if u.path.endswith("install") else "check", text="checking", pct=0, t0=time.time(), error="")
+                return self.send(200, {"ok": True, "job": FW["job"]})
+            if u.path == "/api/firmware/cancel": FW.update(job="idle", pct=0, text="cancelled"); return self.send(200, {"ok": True, "job": "idle"})
+            if u.path == "/api/firmware/rollback": FW.update(job="rebooting", pct=100, text="restarting with v0.9.0"); return self.send(200, {"ok": True, "job": "rebooting"})
+            if u.path == "/api/firmware/upload": FW.update(job="rebooting", pct=100, text="restarting with the uploaded file"); return self.send(200, {"ok": True, "job": "rebooting"})
             if u.path == "/api/action":
                 n = f.get("name")
                 if n == "setLevel": STATE["level"] = int(f.get("level", 1))

@@ -134,8 +134,31 @@
 <section id="firmware" data-group="Firmware">
   <h2>Firmware</h2>
   <div id="fwStatus" class="statusline"></div>
+  <h3>Home Wi-Fi (the board joins it to download updates)</h3>
   <div class="rows"></div>
-  <p class="help">Updates from the page arrive with the next firmware phase.</p>
+  <div class="row-btns">
+    <button id="btnWifiScan" class="ghost">Scan</button>
+    <button id="btnWifiJoin">Join</button>
+    <span id="staStatus" class="muted"></span>
+  </div>
+  <div id="wifiList" class="list"></div>
+  <h3>Updates</h3>
+  <div id="fwJob" class="statusline"></div>
+  <div class="bar" id="fwBarBox" hidden><i id="fwBar"></i></div>
+  <div class="row-btns">
+    <button id="btnFwCheck">Check for an update</button>
+    <button id="btnFwInstall" hidden>Install</button>
+    <button id="btnFwCancel" class="ghost" hidden>Cancel</button>
+  </div>
+  <div id="fwAvail" class="muted"></div>
+  <p id="fwGate" class="help"></p>
+  <details class="adv"><summary>More</summary>
+    <div class="field"><label>Install a specific version</label>
+      <div class="inline"><input type="text" id="fwVersion" placeholder="v0.11.0" autocapitalize="off"><button id="btnFwInstallVer" class="ghost">Install this version</button></div></div>
+    <div class="field"><label>Install a .bin file</label>
+      <div class="inline"><input type="file" id="fwFile" accept=".bin"><button id="btnFwUpload" class="ghost">Upload and install</button></div></div>
+    <div class="row-btns"><button id="btnFwRollback" class="danger">Go back to the previous version</button></div>
+  </details>
 </section>
 
 <section id="diag" data-group="Touch,Diagnostics">

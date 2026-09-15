@@ -90,6 +90,13 @@ try {
   check('patch has three structured keys', await evaluate('patch().n') === 3, await evaluate('Object.keys(patch().doc)'));
   await evaluate('discard()'); await sleep(200);
   check('discard clears', await evaluate('patch().n') === 0);
+  // Firmware card: status, check, the available version and the Install button.
+  for (let i = 0; i < 20 && !(await evaluate('!!S.fw')); i++) await sleep(250);
+  check('firmware status line', /Running/.test(await evaluate('document.querySelector("#fwStatus").textContent')));
+  await evaluate('document.querySelector("#btnFwCheck").click()');
+  for (let i = 0; i < 40 && !(await evaluate('S.fw && S.fw.available')); i++) await sleep(500);
+  check('check found a release', await evaluate('S.fw && S.fw.available && S.fw.available.version') === 'v0.11.0');
+  check('install button offered', await evaluate('!document.querySelector("#btnFwInstall").hidden && document.querySelector("#btnFwInstall").textContent') === 'Install v0.11.0');
   // Diagnostics and Identify pads (the mock fakes a press every ~3 s with --pads).
   await evaluate('startDiag()'); await sleep(1500);
   check('diag pads rendered', await evaluate('document.querySelectorAll("#diagPads .pad").length') === 4);

@@ -45,6 +45,7 @@ static void printHelp() {
   Serial.println("  kbdtype <text>    bench: type text to the host    kbdkey <NAME> [ms]   bench: tap a key, or hold it for ms (Appendix B names)");
   Serial.println("  m                 open the Quick Menu (m again: exit and save); in it: 1 back, 2 or - down, 3 or + up / OK, 4 next");
   Serial.println("  w                 Wi-Fi setup on / off (the AP, the page at http://192.168.4.1)");
+  Serial.println("  wifi <ssid> <pw>  join the home Wi-Fi (also stored in RAM as wifi.*; `save` keeps it)    fw check|install [ver]|rollback|cancel|status   updates (§16)");
   Serial.println();
 }
 
@@ -89,6 +90,28 @@ static void handleLine(char* line, uint32_t now) {
   }
 
   if (!strcmp(cmd, "help")) { printHelp(); return; }
+  if (!strcmp(cmd, "wifi")) {
+    char* pw = rest; while (*pw && *pw != ' ') pw++; if (*pw) { *pw++ = 0; while (*pw == ' ') pw++; }
+    if (!*rest) { Serial.println("usage: wifi <ssid> [password]"); return; }
+    char err[100];
+    if (!s_app->setSetting("wifi.ssid", rest, err, sizeof err) || !s_app->setSetting("wifi.password", pw, err, sizeof err)) { Serial.printf("rejected: %s\n", err); return; }
+    Serial.println(s_app->updater().join(rest, pw, err, sizeof err) ? "joining (fw status shows it; `save` keeps the network)" : err);
+    return;
+  }
+  if (!strcmp(cmd, "fw")) {
+    if (s_app->portal().running()) s_app->portal().noteRequest(true);   // bench: a console job is input too, the idle timer restarts
+    char* arg = rest; while (*arg && *arg != ' ') arg++; if (*arg) { *arg++ = 0; while (*arg == ' ') arg++; }
+    char err[120]; bool ok = true;
+    if (!strcmp(rest, "check")) ok = s_app->updater().check(arg, err, sizeof err);
+    else if (!strcmp(rest, "install")) ok = s_app->updater().install(arg, err, sizeof err);
+    else if (!strcmp(rest, "rollback")) ok = s_app->updater().rollback(err, sizeof err);
+    else if (!strcmp(rest, "cancel")) ok = s_app->updater().cancel(err, sizeof err);
+    else if (!strcmp(rest, "join")) ok = s_app->updater().join("", "", err, sizeof err);
+    else if (!strcmp(rest, "probe")) { s_app->updater().probe(Serial); return; }
+    else { s_app->updater().printStatus(Serial); return; }
+    if (ok) s_app->updater().printStatus(Serial); else Serial.printf("refused: %s\n", err);
+    return;
+  }
   if (!strcmp(cmd, "kcxcrlf")) { s_app->kcx().setCrlf(!s_app->kcx().crlf()); Serial.printf("KCX commands end with %s\n", s_app->kcx().crlf() ? "CR LF" : "nothing"); return; }
   if (!strcmp(cmd, "pin")) { int n = atoi(rest); gpio_dump_io_configuration(stdout, 1ULL << n); fflush(stdout); return; }
   if (!strcmp(cmd, "pairwipe")) { Serial.println(s_app->startPairing(true) ? "forgetting all saved speakers, then pairing: put the speaker in pairing mode; searching for 60 s" : "pairing not started (see the log)"); return; }
@@ -208,6 +231,7 @@ static void handleLine(char* line, uint32_t now) {
   if (!strcmp(cmd, "sounds")) { s_app->cache().list(Serial); return; }
   if (!strcmp(cmd, "play")) { if (*rest) s_app->playFile(rest); else Serial.println("usage: play <file.wav>"); return; }
   if (!strcmp(cmd, "kbd")) { Serial.printf("keyboard %s (RAM; `save` writes it)\n", s_app->toggleKeyboard() ? "enabled: advertising" : "disabled: host dropped, advertising stopped"); return; }
+  if (!strcmp(cmd, "bleoff")) { s_app->keyboard().stopStack(); Serial.println("BLE stack stopped until the next boot"); return; }
   if (!strcmp(cmd, "kbdforget")) { s_app->keyboard().forget(); Serial.println("every keyboard host forgotten; forget the board on the host too, then pair again"); return; }
   if (!strcmp(cmd, "kbdtype")) {
     if (!*rest) { Serial.println("usage: kbdtype <text>"); return; }

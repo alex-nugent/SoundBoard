@@ -17,6 +17,7 @@
 #include "util/strutil.h"
 #include <Arduino.h>
 #include <WebServer.h>
+#include <WiFi.h>
 #include <SD.h>
 #include <ArduinoJson.h>
 #include <esp_heap_caps.h>
@@ -235,17 +236,56 @@ static void hCoredump() {
     off += n;
   }
 }
+// ---------------------------------------------------------------------------
+// Firmware (§16, §15.4 /api/firmware/*): the Updater runs on this task, so its calls need no app hop
+// ---------------------------------------------------------------------------
 static void hFirmwareStatus() {
   P->noteRequest(false);
-  const esp_partition_t* run = esp_ota_get_running_partition();
-  esp_ota_img_states_t st; const char* state = "unknown";
-  if (run && esp_ota_get_state_partition(run, &st) == ESP_OK)
-    state = st == ESP_OTA_IMG_VALID ? "valid" : st == ESP_OTA_IMG_PENDING_VERIFY ? "pending verify" : st == ESP_OTA_IMG_NEW ? "new" : st == ESP_OTA_IMG_UNDEFINED ? "flashed over USB" : "other";
   BufPrint out(P->buf(), P->bufCap());
-  out.print("{\"version\":\""); jsonEscape(out, FW_VERSION); out.printf("\",\"slot\":\"%s\",\"state\":\"%s\",\"usb\":%s,\"job\":\"idle\",\"phase\":\"updates arrive with Phase 11\"}",
-                                                                  run ? run->label : "?", state, P->app().battery().usb() ? "true" : "false");
+  P->app().updater().statusJson(out);
   sendBuf(200, "application/json");
 }
+static void replyJob(bool ok, const char* err) {
+  if (!ok) { sendError(400, err); return; }
+  BufPrint out(P->buf(), 1024);
+  out.print("{\"ok\":true,\"job\":\""); out.print(P->app().updater().jobName()); out.print("\"}");
+  sendBuf(200, "application/json");
+}
+static void hWifiScan() {                                     // blocking, ~2-4 s; the AP keeps its clients
+  P->noteRequest(true);
+  if (busy()) return;
+  WiFi.mode(WIFI_AP_STA);
+  int n = WiFi.scanNetworks(false, false, false, 300);
+  JsonDocument d(psramAllocator());
+  JsonArray arr = d["networks"].to<JsonArray>();
+  for (int i = 0; i < n && i < 30; i++) {
+    if (!WiFi.SSID(i).length()) continue;
+    bool dup = false; for (JsonObject o : arr) if (WiFi.SSID(i) == (const char*)o["ssid"]) { dup = true; break; }
+    if (dup) continue;
+    JsonObject o = arr.add<JsonObject>(); o["ssid"] = WiFi.SSID(i); o["rssi"] = WiFi.RSSI(i); o["open"] = WiFi.encryptionType(i) == WIFI_AUTH_OPEN;
+  }
+  WiFi.scanDelete();
+  BufPrint out(P->buf(), P->bufCap()); serializeJson(d, out); sendBuf(200, "application/json");
+}
+static void hWifiJoin() { P->noteRequest(true); if (busy()) return; char err[120] = { 0 }; bool ok = P->app().updater().join(S->arg("ssid").c_str(), S->arg("password").c_str(), err, sizeof err); replyJob(ok, err); }
+static void hFwCheck()   { P->noteRequest(true); if (busy()) return; char err[120] = { 0 }; bool ok = P->app().updater().check(S->arg("version").c_str(), err, sizeof err); replyJob(ok, err); }
+static void hFwInstall() { P->noteRequest(true); if (busy()) return; char err[120] = { 0 }; bool ok = P->app().updater().install(S->arg("version").c_str(), err, sizeof err); replyJob(ok, err); }
+static void hFwRollback(){ P->noteRequest(true); if (busy()) return; char err[120] = { 0 }; bool ok = P->app().updater().rollback(err, sizeof err); replyJob(ok, err); }
+static void hFwCancel()  { P->noteRequest(true); char err[120] = { 0 }; bool ok = P->app().updater().cancel(err, sizeof err); replyJob(ok, err); }
+// A `.bin` upload (§16): straight into the spare slot through the Updater; declared size from Content-Length when known.
+static bool s_fwUpOk = false; static char s_fwUpErr[120];
+static void hFwUploadData() {
+  HTTPUpload& up = S->upload();
+  Updater& u = P->app().updater();
+  if (up.status == UPLOAD_FILE_START) {
+    s_fwUpErr[0] = 0;
+    int cl = S->clientContentLength();
+    s_fwUpOk = u.uploadStart(cl > 0 ? (size_t)cl : 0, s_fwUpErr, sizeof s_fwUpErr);
+  } else if (up.status == UPLOAD_FILE_WRITE) { if (s_fwUpOk && !u.uploadWrite(up.buf, up.currentSize)) { s_fwUpOk = false; sb::copyStr(s_fwUpErr, sizeof s_fwUpErr, u.error()); } }
+  else if (up.status == UPLOAD_FILE_END) { if (s_fwUpOk) s_fwUpOk = u.uploadEnd(s_fwUpErr, sizeof s_fwUpErr); }
+  else if (up.status == UPLOAD_FILE_ABORTED) { u.uploadAbort("connection lost"); s_fwUpOk = false; sb::copyStr(s_fwUpErr, sizeof s_fwUpErr, "upload stopped"); }
+}
+static void hFwUploadDone() { P->noteRequest(true); replyJob(s_fwUpOk, s_fwUpErr[0] ? s_fwUpErr : "upload failed"); }
 
 // ---------------------------------------------------------------------------
 // Sounds
@@ -439,6 +479,13 @@ void bind(Portal& p) {
   S->on("/api/log", HTTP_GET, hLog);
   S->on("/api/coredump", HTTP_GET, hCoredump);
   S->on("/api/firmware/status", HTTP_GET, hFirmwareStatus);
+  S->on("/api/firmware/wifi/scan", HTTP_POST, hWifiScan);
+  S->on("/api/firmware/wifi/join", HTTP_POST, hWifiJoin);
+  S->on("/api/firmware/check", HTTP_POST, hFwCheck);
+  S->on("/api/firmware/install", HTTP_POST, hFwInstall);
+  S->on("/api/firmware/upload", HTTP_POST, hFwUploadDone, hFwUploadData);
+  S->on("/api/firmware/rollback", HTTP_POST, hFwRollback);
+  S->on("/api/firmware/cancel", HTTP_POST, hFwCancel);
   S->on("/api/sounds", HTTP_GET, hSounds);
   S->on("/api/sounds/upload", HTTP_POST, hSoundUploadDone, hSoundUploadData);
   S->on("/api/sounds/delete", HTTP_POST, hSoundDelete);

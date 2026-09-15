@@ -90,6 +90,18 @@ struct SetupScreen : Screen {
   void draw(Display& d, uint8_t regions) override;
 };
 
+// §16: the update progress screen.
+struct UpdateView {
+  char    line[48] = "";      // "downloading v0.11.0 45 %"
+  uint8_t pct = 0;
+  bool    failed = false;
+};
+
+struct UpdateScreen : Screen {
+  const UpdateView* view = nullptr;
+  void draw(Display& d, uint8_t regions) override;
+};
+
 // §11.8 / §12.3: "OFF" or "BATTERY EMPTY" at a big scale, optional second line.
 struct MessageScreen : Screen {
   const char* text = "";

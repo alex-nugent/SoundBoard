@@ -229,12 +229,33 @@ diagnostics (live pad deltas at 1 Hz while the card is on screen, cache,
 audio counters, KCX line, memory, stacks, battery K entry, recalibrate, log
 tail). Changes collect in a draft and go as one partial `PUT /api/config`
 (merged, validated, applied live, saved once); Discard puts previewed display
-settings back. Endpoints: §15.4 minus `/api/firmware/*` (Phase 11: only
-`/api/firmware/status` answers). Console `s` prints a `setup:` line. The page
+settings back. Endpoints: all of §15.4. Console `s` prints a `setup:` line. The page
 is developed against `tools/mock_portal.py` in a desktop browser and checked
 end to end by `tools/page_check.mjs` (headless Chrome over the DevTools
 protocol: rows, level editing with the goToLevel remap, save/discard, the
 converter, upload/rename/delete, Identify pads).
+
+Firmware updates (Phase 11, §16): the page's Firmware card joins the home
+Wi-Fi (or a phone hotspot next to the board, the surest signal), checks the
+public releases repository (`update.repo`, default `alex-nugent/SoundBoard`)
+for `releases/latest/download/manifest.json`, and installs the release image
+into the other app slot: `src/net/ota.*` resolves the host first and connects
+by address (the host name goes to TLS for SNI and to the Host header;
+redirects followed by hand), streams the image in 4 KB steps with a running
+SHA-256, resumes with HTTP Range after a drop (rejoining the Wi-Fi first, up
+to 20 times), and restarts 1.5 s after `Update.end`. UPDATING
+(`src/app/update.cpp`) takes the audio rail down, ignores pads and buttons,
+suspends the keyboard and shows the progress screen; after the reboot the
+health check marks the image valid once the screen, configuration, pads and
+rail are up for 30 s, or rolls back at 90 s. SETUP resumes after the reboot
+(`sb-state/resumeSetup`). USB power is required to install. A `.bin` can also
+be uploaded from the page, and the previous version restored (Roll back).
+Console: `w` (SETUP on/off), `wifi <ssid> [password]` (RAM only; `save`
+writes it), `fw check|install [version]|rollback|cancel|join|probe|status`.
+After an OTA, a USB reflash needs the OTA record erased
+(`esptool erase_region 0xe000 0x2000`) or the bootloader keeps the other
+slot. Releases are built by `.github/workflows/release.yml` from a tag pushed
+with `tools/publish.sh vX.Y.Z` (Alex runs it).
 
 Bluetooth LE keyboard (Phase 7): the board advertises as `device.name`
 (default `SoundBoard V4`) whenever `keyboard.enabled` and no host is

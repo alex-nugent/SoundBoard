@@ -108,7 +108,7 @@ void AppState::tickSetup(uint32_t now) {
   portal_.tickApp();                                             // a handler waiting on the app task, in every mode
   if (!setupOn_) return;
   if (portal_.stopRequested()) { char why[48]; snprintf(why, sizeof why, "page: %s", portal_.stopReason()); stopSetup(why); return; }
-  if (cfg_.setup.idleOffMin && due(now, portal_.lastInputRequestMs() + (uint32_t)cfg_.setup.idleOffMin * 60000UL)) {   // §15.1
+  if (cfg_.setup.idleOffMin && !updater_.busy() && due(now, portal_.lastInputRequestMs() + (uint32_t)cfg_.setup.idleOffMin * 60000UL)) {   // §15.1; not while an update runs
     char why[40]; snprintf(why, sizeof why, "%u min without a change", (unsigned)cfg_.setup.idleOffMin);
     stopSetup(why);
     return;

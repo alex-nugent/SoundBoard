@@ -44,7 +44,7 @@ bool Portal::start(AppState& app, const char* password, bool recovery) {
   snprintf(ssid_, sizeof ssid_, "SoundBoard-%02X%02X", mac[4], mac[5]);
   uint32_t t0 = millis();
   WiFi.persistent(false);
-  WiFi.mode(WIFI_AP);
+  WiFi.mode(WiFi.STA.connected() ? WIFI_AP_STA : WIFI_AP);      // a station already joined (console `fw join`) stays
   IPAddress ip(192, 168, 4, 1);                                  // the core's soft-AP default; the server binds to it (§15.2)
   if (!WiFi.softAP(ssid_, password)) {
     LOG_E(TAG, "soft AP \"%s\" did not start", ssid_);
@@ -98,14 +98,16 @@ void Portal::netMain() {
   while (running_) {
     server_->handleClient();
     dns_->processNextRequest();
+    if (!app_->updater().ownTask()) app_->updater().tick(true);   // §15.4: one bounded job step per pass
     vTaskDelay(1);
   }
   netDone_ = true;
   vTaskDelete(NULL);
 }
 
-bool Portal::callOnApp(AppFn fn, void* ctx) {
-  if (!running_ && netDone_) return false;
+bool Portal::callOnApp(AppFn fn, void* ctx) {                  // any task; tickApp() drains the queue in every mode, SETUP on or off
+  if (!callQ_) callQ_ = xQueueCreate(1, sizeof(Call));
+  if (!done_)  done_ = xSemaphoreCreateBinary();
   Call c = { fn, ctx };
   xQueueSend((QueueHandle_t)callQ_, &c, portMAX_DELAY);
   xSemaphoreTake((SemaphoreHandle_t)done_, portMAX_DELAY);
