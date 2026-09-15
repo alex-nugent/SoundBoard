@@ -16,7 +16,7 @@ if [[ -n "$1" ]]; then
   case "$1" in v*) ;; *) echo "a version looks like v1.2.0"; exit 1;; esac
   SHA=$(git subtree split --prefix=firmware)
   git tag -f "$1" "$SHA"
-  git push public "refs/tags/$1"
+  git push -f public "refs/tags/$1"          # re-tagging a version after a fix moves the tag (a release already built for it is deleted on GitHub first)
   git tag -d "$1" >/dev/null
   echo "tagged $1 on the public repository; the release builds at https://github.com/alex-nugent/SoundBoard/actions"
 fi

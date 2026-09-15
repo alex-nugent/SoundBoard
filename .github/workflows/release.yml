@@ -20,7 +20,7 @@ jobs:
       - uses: actions/setup-python@v5
         with: { python-version: '3.12' }
       - name: PlatformIO
-        run: pip install platformio==6.1.16
+        run: pip install platformio==6.2.0
       - name: Host tests
         run: pio test -e native
       - name: Build
