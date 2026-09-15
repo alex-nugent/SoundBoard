@@ -83,7 +83,8 @@ void BleKeyboard::cbUndelivered() { undelivered_++; }
 bool BleKeyboard::begin(const sb::Config& cfg) {
   s_self = this;
   strlcpy(name_, cfg.device.name[0] ? cfg.device.name : "SoundBoard V4", sizeof name_);
-  enabled_ = cfg.keyboard.enabled;
+  cfgEnabled_ = cfg.keyboard.enabled;
+  enabled_ = cfgEnabled_ && !paused_;
   m_.configure(cfg.keyboard.typeDelayMs, cfg.keyboard.holdKeysMaxMs);
   m_.setKeymap(keymapLookup);
   uint32_t t0 = millis();
@@ -129,7 +130,19 @@ bool BleKeyboard::begin(const sb::Config& cfg) {
 
 void BleKeyboard::configure(const sb::Config& cfg) {
   m_.configure(cfg.keyboard.typeDelayMs, cfg.keyboard.holdKeysMaxMs);
-  bool en = cfg.keyboard.enabled;
+  cfgEnabled_ = cfg.keyboard.enabled;
+  applyEnable();
+}
+
+void BleKeyboard::setPaused(bool on) {                        // §8.5
+  if (on == paused_) return;
+  paused_ = on;
+  LOG_I(TAG, "keyboard %s for SETUP (setup.pauseKeyboard)", on ? "paused" : "resumed");
+  applyEnable();
+}
+
+void BleKeyboard::applyEnable() {
+  bool en = cfgEnabled_ && !paused_;
   if (en == enabled_) return;
   enabled_ = en;
   if (!init_) return;

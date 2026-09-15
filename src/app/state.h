@@ -29,6 +29,7 @@
 #include "ble/keyboard.h"
 #include "app/levels.h"
 #include "app/menu_model.h"
+#include "net/portal.h"
 
 enum class BootKind : uint8_t { Cold, SleepWake, OffWake };
 
@@ -94,6 +95,25 @@ class AppState : private PressHost {
   bool toggleKeyboard();                   // console `kbd`: keyboard.enabled in RAM (§8.4)
   BleKeyboard& keyboard() { return kbd_; }
 
+  // §15: SETUP, the Wi-Fi settings portal (app/setup.cpp). An overlay on ACTIVE / DIMMED.
+  bool setupOn() const { return setupOn_; }
+  bool startSetup(const char* why, bool recovery);   // the menu item, console `w`, recovery at boot; false = the AP did not start (!WIFI)
+  void stopSetup(const char* why);                   // the page, the menu item, `w`, the idle timeout, any power-down
+  Portal& portal() { return portal_; }
+  // Portal work, run on the app task by the handlers of net/api.cpp through Portal::onApp() (§19.2).
+  struct PortalArgs { char name[24]; char value[65]; char path[48]; int level, button, jack; float volts; char pattern[100]; };
+  void portalStatus(Print& out);
+  void portalDiag(Print& out);
+  void portalSounds(Print& out);
+  void portalConfig(Print& out, bool support);
+  bool portalApply(const char* json, bool replace, bool keepHardware, char* err, size_t errLen);   // PUT / upload: validate, apply live, save
+  void portalReport(Print& out);                     // the warnings of the last validation, as a JSON array
+  bool portalPlay(const PortalArgs& a, char* err, size_t errLen);
+  bool portalAction(const PortalArgs& a, Print& out, char* err, size_t errLen);
+  bool portalSoundDelete(const char* name, char* err, size_t errLen);
+  bool portalSoundRename(const char* name, const char* to, char* err, size_t errLen);
+  void rescanSounds();                               // after an upload, delete or rename: the cache table from the card again
+
   uint16_t faults() const { return faults_; }
   void setFault(uint16_t bit, bool on);
   void message(const char* text, uint32_t ms);
@@ -152,6 +172,11 @@ class AppState : private PressHost {
   void setVolumeLive(uint8_t pct, uint32_t now);
   void volumeChanged(uint32_t now, bool popup);                    // after any master-volume change: gain, RTC, status row, NVS write-behind
   void updateStateWord(uint32_t now);                              // §11.4 bottom line, priority 4
+  // §15 (app/setup.cpp)
+  void tickSetup(uint32_t now);
+  void showSetupCard(uint32_t now);
+  void showHome();                                                 // the normal view, or the setup card while it is due
+  void hideSetupCard(uint32_t now);                                // a pad or button: the card gives way for 10 s
   void    playSound(const char* sound, uint8_t volumePct, uint16_t pressId, uint32_t now, bool repeat) override;
   void    runAction(const sb::Entry& e, uint16_t pressId, uint32_t now) override;
   void    levelPad(uint16_t pressId, uint32_t now, bool repeat) override;
@@ -209,6 +234,14 @@ class AppState : private PressHost {
   sb::HoldProgress menuHold_;
   uint32_t         menuLastKeyAt_ = 0, menuResultUntil_ = 0, menuPairTickAt_ = 0;
   bool             menuCalibrating_ = false;
+  // §15: SETUP.
+  Portal           portal_;
+  SetupView        setupView_;
+  SetupScreen      setupScreen_;
+  bool             setupOn_ = false, setupRecovery_ = false, setupCardShown_ = false;
+  uint32_t         setupCardAt_ = 0, setupTickAt_ = 0;
+  uint16_t         identSeq_ = 0;              // every PadDown: the channel and position, for the page's Identify pads (§15.3)
+  uint8_t          identCh_ = 0, identPos_ = 0;
   bool             wokeFromOff_ = false, padSinceWake_ = false, lowWarned_ = false;
   uint32_t         emptyAt_ = 0;
   uint8_t          level_ = 0;                 // mirrors levels_.current()

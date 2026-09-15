@@ -3,3 +3,4 @@
 *.bin
 *.elf
 __pycache__/
+src/net/page_gz.h

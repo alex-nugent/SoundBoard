@@ -56,6 +56,14 @@ void test_labels_and_values() {
   m.valueText(cfg, 60, s, sizeof s); TEST_ASSERT_EQUAL_STRING("press CANCEL", s);
   goTo(MenuKind::WifiSetup);
   m.valueText(cfg, 60, s, sizeof s); TEST_ASSERT_EQUAL_STRING("press START twice", s);
+  m.setSetupOn(true);                                          // §15.1: while SETUP runs the item stops it, one press
+  m.label(s, sizeof s); TEST_ASSERT_EQUAL_STRING("Stop Wi-Fi setup", s);
+  TEST_ASSERT_EQUAL_STRING("STOP", m.actionVerb());
+  TEST_ASSERT_FALSE(m.confirmNeeded());
+  m.valueText(cfg, 60, s, sizeof s); TEST_ASSERT_EQUAL_STRING("press STOP", s);
+  m.setSetupOn(false);
+  m.label(s, sizeof s); TEST_ASSERT_EQUAL_STRING("Wi-Fi setup", s);
+  TEST_ASSERT_TRUE(m.confirmNeeded());
   goTo(MenuKind::PairSpeaker);
   TEST_ASSERT_EQUAL_STRING("PAIR", m.actionVerb());
   m.setPairWipeOffered(true);

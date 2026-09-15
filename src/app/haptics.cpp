@@ -44,6 +44,13 @@ bool Haptics::confirmPulse(uint32_t now) {
   return ok;
 }
 
+void Haptics::playPattern(const uint16_t* onOff, uint8_t n, uint32_t now) {
+  if (!n) return;
+  m_.pattern(onOff, n, now);
+  LOG_I(TAG, "buzz: a %u-segment pattern from the page at %u %%, %lu ms", (unsigned)n, (unsigned)strength_, (unsigned long)m_.remainingMs(now));
+  tick(now);
+}
+
 void Haptics::buzzTest(const sb::Config& c, uint8_t levelIdx, uint32_t now) {
   uint16_t p[sb::MAX_PATTERN];
   uint8_t n = sb::levelPattern(c, levelIdx, p, sb::MAX_PATTERN);

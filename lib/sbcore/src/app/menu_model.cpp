@@ -33,7 +33,8 @@ const char* MenuModel::actionVerb() const {
     case MenuKind::Exit:        return "SAVE";
     case MenuKind::Cancel:      return "CANCEL";
     case MenuKind::PairSpeaker: return "PAIR";
-    case MenuKind::Recalibrate: case MenuKind::WifiSetup: return "START";
+    case MenuKind::Recalibrate: return "START";
+    case MenuKind::WifiSetup:   return setupOn_ ? "STOP" : "START";
     default: return "";
   }
 }
@@ -143,6 +144,7 @@ void MenuModel::unitOf(const char* label, char* unit, size_t n) {
 }
 
 void MenuModel::label(char* out, size_t n) const {
+  if (item().kind == MenuKind::WifiSetup && setupOn_) { copyStr(out, n, "Stop Wi-Fi setup"); return; }
   const MenuItem& it = item();
   copyStr(out, n, it.label ? it.label : "");
   if (it.kind != MenuKind::Setting) return;

@@ -37,7 +37,9 @@ class MenuModel {
   const char* actionVerb() const;                            // the word above the OK pad: SAVE, CANCEL, PAIR, START ("" for a value item)
   // An action runs on the "up" press (P2 or +), like raising a value (CP-9: the + hold of the draft was
   // an accident guard nobody could read). Wi-Fi setup alone wants that press twice: the first arms it.
-  bool confirmNeeded() const { return item().kind == MenuKind::WifiSetup; }
+  bool confirmNeeded() const { return item().kind == MenuKind::WifiSetup && !setupOn_; }   // stopping it is one press
+  void setSetupOn(bool on) { setupOn_ = on; }               // §15.1: the item reads "Stop Wi-Fi setup" while SETUP runs
+  bool setupOn() const { return setupOn_; }
   bool armed() const { return armed_; }
   void arm() { armed_ = true; }
   void disarm() { armed_ = false; }
@@ -68,7 +70,7 @@ class MenuModel {
   MenuItem items_[MENU_MAX_ITEMS];
   char     snap_[MENU_MAX_ITEMS][MENU_TEXT];
   uint8_t  n_ = 0, i_ = 0, snapVol_ = 60;
-  bool     pairWipe_ = false, armed_ = false;
+  bool     pairWipe_ = false, armed_ = false, setupOn_ = false;
 };
 
 }  // namespace sb

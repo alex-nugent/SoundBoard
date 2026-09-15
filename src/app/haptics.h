@@ -14,6 +14,7 @@ class Haptics {
   void singlePulse(uint32_t now);                                       // §5.3 return-to-level-1 cue
   bool confirmPulse(uint32_t now);                                      // §9.2; false = skipped (pattern running) or disabled
   void buzzTest(const sb::Config& c, uint8_t levelIdx, uint32_t now);   // console `v` / portal Buzz
+  void playPattern(const uint16_t* onOff, uint8_t n, uint32_t now);    // portal Buzz on a pattern typed on the page
   void stop();                                                          // OFF, shutdown, UPDATING: pin LOW at once
   void tick(uint32_t now);
   bool active() const { return m_.active(); }

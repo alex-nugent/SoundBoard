@@ -44,12 +44,8 @@ static void printHelp() {
   Serial.println("  kbd | kbdforget   toggle the BLE keyboard (RAM) / forget every bonded host (ble_store_clear)");
   Serial.println("  kbdtype <text>    bench: type text to the host    kbdkey <NAME> [ms]   bench: tap a key, or hold it for ms (Appendix B names)");
   Serial.println("  m                 open the Quick Menu (m again: exit and save); in it: 1 back, 2 or - down, 3 or + up / OK, 4 next");
-  Serial.println("  w                 Wi-Fi setup (Phase 10)");
+  Serial.println("  w                 Wi-Fi setup on / off (the AP, the page at http://192.168.4.1)");
   Serial.println();
-}
-
-static void notYet(const char* what, int phase) {
-  Serial.printf("%s: arrives with Phase %d\n", what, phase);
 }
 
 static void handleLine(char* line, uint32_t now) {
@@ -84,7 +80,10 @@ static void handleLine(char* line, uint32_t now) {
         if (s_app->mode() == AppMode::Menu) { s_app->closeMenu(true, "console"); Serial.println("menu closed (saved if anything changed)"); }
         else { s_app->openMenu("console"); Serial.println(s_app->mode() == AppMode::Menu ? "menu open: 1 back, 2 or - down, 3 or + up (OK on an action), 4 next, m exits and saves" : "menu not opened (see the log)"); }
         return;
-      case 'w': notYet("Wi-Fi setup", 10); return;
+      case 'w':
+        if (s_app->setupOn()) { s_app->stopSetup("console"); Serial.println("setup off"); }
+        else Serial.println(s_app->startSetup("console", false) ? "setup on: join the Wi-Fi shown on the screen, the page opens by itself (or http://192.168.4.1)" : "setup did not start (see the log)");
+        return;
       default: Serial.printf("unknown command '%c' -- ? for help\n", cmd[0]); return;
     }
   }

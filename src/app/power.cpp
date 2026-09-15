@@ -30,6 +30,7 @@ bool AppState::sleepAllowed() const {                          // §3.2
   if (buttons_.minusDown() || buttons_.plusDown()) return false;
   if (hintShown_ || touch_.calibrating()) return false;
   if (recoveryRequested_) return false;
+  if (setupOn_) return false;                                  // §3.2: SETUP blocks SLEEP
   return true;
 }
 
@@ -48,6 +49,7 @@ void AppState::fillRtcForSleep(uint8_t kind) {                 // §12.3 SLEEP s
 }
 
 void AppState::quiesce() {                                     // §12.3 "Quiesce": <= 300 ms
+  stopSetup("power down");                                     // §15.1: the AP and the net task go first (rule 14)
   haptics_.stop(); jacks_.allOff();                            // §9.4 / §10: OFF stops the motor at once, every relay opens
   kbd_.shutdown(millis());                                     // §8.3: keys up, host dropped, advertising stopped
   if (audio_.playing()) {

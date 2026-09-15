@@ -27,6 +27,11 @@ lib/sbcore/           pure logic shared with the host tests: Config, settings ta
 lib/Adafruit_ST77xx/  vendored screen driver (registry copy minus its SD dependency)
 test/test_config/     native tests for the configuration core
 tools/version.py      pre-build: embeds FW_VERSION
+tools/build_page.py   pre-build: data/portal/ -> src/net/page_gz.h (inlined, minified, gzipped; generated, not committed)
+tools/mock_portal.py  a desktop stand-in for the board's /api/* so the page runs in a browser (python3 tools/mock_portal.py 8080)
+tools/page_check.mjs  drives the page in headless Chrome against the mock (node tools/page_check.mjs)
+data/portal/          the settings page: index.html, style.css, app.js
+src/net/              portal.* (AP, DNS, mDNS, the net task, the app-task bridge), api.cpp (the endpoints)
 examples/             config.annalise.json (spec §13.6) and its one-line `merge` form
 ```
 
@@ -34,7 +39,7 @@ examples/             config.annalise.json (spec §13.6) and its one-line `merge
 
 `?` help, `s` status, `get <path>`, `set <path> <value>`, `merge <json>`,
 `save`, `dump`, `factory`, `log [n]`, `loglevel <level>`, `reboot`, `crash`,
-`wdt`. A value for `set` is JSON when it parses (`60`, `true`,
+`wdt`, `w` Wi-Fi setup on / off. A value for `set` is JSON when it parses (`60`, `true`,
 `[1,3,3,3]`, `{"offHoldMs":1200}`) and text otherwise (`green`); string and
 enum settings always take text. `set` and `merge` change the running
 configuration only; `save` writes `config.json` and the flash mirror.
@@ -180,6 +185,50 @@ CP-9: the two buttons sit one behind the other and Alex wants "up" away from
 him, so `pins.h` now has − on IO8 (U5, near) and + on IO6 (U4, far), the
 opposite of the Draft 4 pin map; and her VOLUME level reads Quieter, Mute,
 Louder from the left (`examples/`, card revision 23).
+
+Wi-Fi settings portal (Phase 10, §15): the Quick Menu's Wi-Fi setup item
+(START pressed twice; the menu closes) or console `w` starts SETUP: a soft AP
+`SoundBoard-xxxx` (the last two MAC bytes) with `setup.password`, address
+192.168.4.1, a catch-all DNS so the phone's sign-in sheet opens the page by
+itself, mDNS `soundboard.local`, and the WebServer bound to the AP address in
+its own `net` task on core 0 (`src/net/portal.*`). Every request handler runs
+there and hands the part that touches module state to the app task through
+`Portal::onApp()` (a queue of one call and a semaphore), so the modules stay
+single-task (§19.2); the reply is built into a 256 KB PSRAM buffer and sent
+from the net task. The screen shows SETUP ON on the bottom line and the
+setup card (network, password, address, phones connected; RECOVERY in red
+when the board came up with both buttons held) until the first pad or
+button, and again after 10 s without one. SETUP ends from the page ("Turn off
+setup"), the same menu item (now "Stop Wi-Fi setup", one press), `w`,
+`setup.idleOffMin` without a change from the page (status polls do not
+count), or any power-down; SLEEP is blocked while it runs, DIMMED is not.
+`setup.pauseKeyboard` stops BLE advertising and drops the host for the
+duration. The page (`data/portal/`, one file with no external assets, built
+into `src/net/page_gz.h` by `tools/build_page.py`, 15 KB gzipped) renders
+the settings forms from `GET /api/schema` (the descriptor table, grouped,
+ADVANCED rows collapsed) and has hand-written editors for the levels (add,
+move, delete, rename, set as current; per entry sound, label, typed text or
+a key with hold/tap, action with a goToLevel target that follows a reorder,
+volume, vibration, jack; Play), the sounds (the library with format, length
+and used-by; Play, Rename, Delete with the entries and cues rewritten in one
+save; Add converts a phone recording in the browser to mono 44.1 kHz 16-bit
+WAV, trimmed at the edges and peak-normalised to -1 dBFS, then uploads it
+with progress and Cancel; the iOS sign-in sheet cannot pick files and says
+so), the cues, the owner label, the level-cue pattern, the pad order
+(Identify pads: touch the pads left to right, the channels are read from
+`/api/diag`, then saved as `hardware.padChannels`), backup (download
+config.json, the support copy without passwords, upload with the
+"came from this board" tick for `hardware.*`, the log, the crash dump) and
+diagnostics (live pad deltas at 1 Hz while the card is on screen, cache,
+audio counters, KCX line, memory, stacks, battery K entry, recalibrate, log
+tail). Changes collect in a draft and go as one partial `PUT /api/config`
+(merged, validated, applied live, saved once); Discard puts previewed display
+settings back. Endpoints: §15.4 minus `/api/firmware/*` (Phase 11: only
+`/api/firmware/status` answers). Console `s` prints a `setup:` line. The page
+is developed against `tools/mock_portal.py` in a desktop browser and checked
+end to end by `tools/page_check.mjs` (headless Chrome over the DevTools
+protocol: rows, level editing with the goToLevel remap, save/discard, the
+converter, upload/rename/delete, Identify pads).
 
 Bluetooth LE keyboard (Phase 7): the board advertises as `device.name`
 (default `SoundBoard V4`) whenever `keyboard.enabled` and no host is

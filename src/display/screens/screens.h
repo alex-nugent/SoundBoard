@@ -76,6 +76,20 @@ struct MenuScreen : Screen {
   void draw(Display& d, uint8_t regions) override;
 };
 
+// §15.2: the setup card (network name, password, address, phones connected; the recovery banner).
+struct SetupView {
+  char    ssid[33] = "";
+  char    password[25] = "";
+  char    url[28] = "";
+  uint8_t clients = 0;
+  bool    recovery = false;
+};
+
+struct SetupScreen : Screen {
+  const SetupView* view = nullptr;
+  void draw(Display& d, uint8_t regions) override;
+};
+
 // §11.8 / §12.3: "OFF" or "BATTERY EMPTY" at a big scale, optional second line.
 struct MessageScreen : Screen {
   const char* text = "";

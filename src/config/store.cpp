@@ -40,6 +40,7 @@ struct PsramAllocator : ArduinoJson::Allocator {
   void* reallocate(void* p, size_t n) override { return heap_caps_realloc(p, n, MALLOC_CAP_SPIRAM); }
 };
 static PsramAllocator s_alloc;
+ArduinoJson::Allocator* psramAllocator() { return &s_alloc; }
 
 static void* psAlloc(size_t n) {
   void* p = heap_caps_malloc(n, MALLOC_CAP_SPIRAM);
@@ -392,7 +393,8 @@ bool ConfigStore::save(Config& live, bool userAction, char* err, size_t errLen) 
 // Edits
 // ---------------------------------------------------------------------------
 bool ConfigStore::applyCandidate(JsonDocument& cand, Config& live, ConfigReport& rep, char* err, size_t errLen) {
-  static Config trial;                     // 13 KB: not on the stack
+  static Config* trialP = static_cast<Config*>(psAlloc(sizeof(Config)));   // 13 KB: not on the stack, not in internal RAM (Wi-Fi needs it, CP-10)
+  Config& trial = *trialP;
   rep.clear();
   int s = sb::config::migrateDocument(cand.as<JsonObject>(), rep);
   if (s < 0) { snprintf(err, errLen, "schema newer than this firmware"); return false; }
@@ -463,8 +465,80 @@ bool ConfigStore::mergeText(const char* text, Config& live, ConfigReport& rep, c
   return ok;
 }
 
+bool ConfigStore::applyText(const char* text, bool replace, bool keepHardware, Config& live, ConfigReport& rep, char* err, size_t errLen) {
+  if (schemaTooNew_) { snprintf(err, errLen, "update the firmware first (card file has a newer schema)"); return false; }
+  JsonDocument patch(&s_alloc);
+  DeserializationError e = deserializeJson(patch, (const char*)text, strlen(text));
+  if (e) { snprintf(err, errLen, "not valid JSON: %s", e.c_str()); return false; }
+  if (!patch.is<JsonObject>()) { snprintf(err, errLen, "expected a JSON object"); return false; }
+  JsonDocument& cand = *scratch_;
+  if (!copyDoc(cand, *doc_)) { snprintf(err, errLen, "out of memory"); return false; }
+  JsonObject root = cand.as<JsonObject>();
+  if (root.isNull()) root = cand.to<JsonObject>();
+  JsonObject p = patch.as<JsonObject>();
+  if (!keepHardware) {
+    p.remove("hardware");
+    if (replace && !root["hardware"].isNull()) p["hardware"] = root["hardware"];   // the board's own stays
+  }
+  if (replace) { cand.clear(); copyDoc(cand, patch); }
+  else sb::config::merge(root, patch.as<JsonObjectConst>());
+  bool ok = applyCandidate(cand, live, rep, err, errLen);
+  cand.clear();
+  return ok;
+}
+
+bool ConfigStore::editDocument(EditFn fn, void* ctx, Config& live, ConfigReport& rep, char* err, size_t errLen) {
+  if (schemaTooNew_) { snprintf(err, errLen, "update the firmware first (card file has a newer schema)"); return false; }
+  JsonDocument& cand = *scratch_;
+  if (!copyDoc(cand, *doc_)) { snprintf(err, errLen, "out of memory"); return false; }
+  JsonObject root = cand.as<JsonObject>();
+  if (root.isNull()) root = cand.to<JsonObject>();
+  bool ok = fn(root, ctx) && applyCandidate(cand, live, rep, err, errLen);
+  if (!ok && !err[0]) snprintf(err, errLen, "nothing to change");
+  cand.clear();
+  return ok;
+}
+
+bool ConfigStore::resetScalars(Config& live, ConfigReport& rep, char* err, size_t errLen) {
+  if (schemaTooNew_) { snprintf(err, errLen, "update the firmware first (card file has a newer schema)"); return false; }
+  JsonDocument& cand = *scratch_;
+  if (!copyDoc(cand, *doc_)) { snprintf(err, errLen, "out of memory"); return false; }
+  JsonObject root = cand.as<JsonObject>();
+  if (root.isNull()) root = cand.to<JsonObject>();
+  for (size_t i = 0; i < sb::N_SETTINGS; i++) {
+    const sb::SettingDesc& d = sb::SETTINGS[i];
+    if (!strncmp(d.path, "hardware.", 9) || !strncmp(d.path, "wifi.", 5)) continue;   // §15.1: kept
+    JsonVariant leaf = sb::config::ensure(root, d.path);
+    if (d.type == sb::SType::String || d.type == sb::SType::Enum) leaf.set(sb::config::copied(d.def));
+    else {
+      JsonDocument value(&s_alloc);
+      if (!deserializeJson(value, d.def)) leaf.set(value.as<JsonVariantConst>()); else leaf.set(sb::config::copied(d.def));
+    }
+  }
+  bool ok = applyCandidate(cand, live, rep, err, errLen);
+  cand.clear();
+  return ok;
+}
+
+void ConfigStore::exportTo(const Config& live, Print& out, bool pretty, bool stripSecrets) {
+  JsonDocument& tmp = *scratch_;
+  tmp.clear();
+  if (!copyDoc(tmp, *doc_)) { out.print("{}"); return; }
+  JsonObject root = tmp.as<JsonObject>();
+  if (root.isNull()) root = tmp.to<JsonObject>();
+  sb::config::save(live, root);                                 // the effective document: every key, unknown ones kept
+  root["revision"] = (unsigned long)live.revision;
+  if (stripSecrets) {
+    if (!root["setup"].isNull()) root["setup"].as<JsonObject>().remove("password");
+    if (!root["wifi"].isNull())  root["wifi"].as<JsonObject>().remove("password");
+  }
+  if (pretty) serializeJsonPretty(tmp, out); else serializeJson(tmp, out);
+  tmp.clear();
+}
+
 bool ConfigStore::factory(Config& live, char* err, size_t errLen) {
-  static Config d;
+  static Config* dP = static_cast<Config*>(psAlloc(sizeof(Config)));
+  Config& d = *dP;
   sb::config::defaults(d);
   doc_->clear();
   JsonObject root = doc_->to<JsonObject>();

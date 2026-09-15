@@ -9,6 +9,8 @@
 
 enum class ConfigSource : uint8_t { None, Card, CardTmp, Backup, Mirror, Defaults };
 
+ArduinoJson::Allocator* psramAllocator();   // §13.1 rule 6: documents live in PSRAM (the portal builds its replies with it too)
+
 class ConfigStore {
  public:
   bool begin();                       // LittleFS (formats on first use), documents in PSRAM
@@ -33,6 +35,17 @@ class ConfigStore {
   // passes (§13.4); nothing is written until save().
   bool setPath(const char* path, const char* text, sb::Config& live, sb::ConfigReport& rep, char* err, size_t errLen);
   bool mergeText(const char* text, sb::Config& live, sb::ConfigReport& rep, char* err, size_t errLen);
+  // The portal (§15.4): a partial PUT merges; a whole-file upload replaces the document. `hardware.*` from the
+  // text is dropped unless keepHardware (§15.3: "this file came from this board").
+  bool applyText(const char* text, bool replace, bool keepHardware, sb::Config& live, sb::ConfigReport& rep, char* err, size_t errLen);
+  // An in-place edit of a candidate copy (sound delete / rename: entries and cues rewritten in one save).
+  typedef bool (*EditFn)(ArduinoJson::JsonObject root, void* ctx);
+  bool editDocument(EditFn fn, void* ctx, sb::Config& live, sb::ConfigReport& rep, char* err, size_t errLen);
+  // Recovery "Reset settings" (§15.1): every scalar row to its default; levels, roles, hardware.*, the owner
+  // label, the cues and wifi.* stay.
+  bool resetScalars(sb::Config& live, sb::ConfigReport& rep, char* err, size_t errLen);
+  // The live document as text (§15.4 GET /api/config and the downloads); stripSecrets removes the passwords.
+  void exportTo(const sb::Config& live, Print& out, bool pretty, bool stripSecrets);   // every key present (the effective values)
 
   // Full factory reset: the defaults document written to the card and the mirror.
   bool factory(sb::Config& live, char* err, size_t errLen);

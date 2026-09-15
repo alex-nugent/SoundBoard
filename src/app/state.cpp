@@ -158,6 +158,10 @@ void AppState::enterActive(uint32_t now) {
   lastInputMs_ = now;
   levels_.onInput(now);
   LOG_I(TAG, "ACTIVE at +%lu ms (normal view)", (unsigned long)now);
+  if (recoveryRequested_ && !setupOn_) {                       // §17.2: recovery starts SETUP with the current password on the card
+    startupCuePending_ = false;
+    startSetup("recovery (both buttons held through the reset)", true);
+  }
 }
 
 void AppState::enterDimmed(uint32_t now) {
@@ -318,6 +322,7 @@ void AppState::handleEvent(const Event& e, uint32_t now) {
   switch (e.type) {
     case Ev::PadDown: {
       registerInput(now);
+      if (setupCardShown_) hideSetupCard(now);                     // §15.2: the card gives way to the normal view for 10 s
       if (mode_ == AppMode::Menu) {                                // §14.4 (CP-9 layout): left half back / down, right half up (OK) / next; no sound plays
         LOG_I(TAG, "PadDown P%u in the menu [press %u]", e.pad.pos + 1, e.pad.pressId);
         menuKey(e.pad.pos == 0 ? MenuKey::Prev : e.pad.pos == 1 ? MenuKey::Down : e.pad.pos == 2 ? MenuKey::Up : MenuKey::Next, now);
@@ -326,6 +331,7 @@ void AppState::handleEvent(const Event& e, uint32_t now) {
       padSinceWake_ = true;                                        // §3.2: a pad press ends the off-return rule
       const sb::Role role = e.pad.pos < 4 ? cfg_.pads.roles[e.pad.pos] : sb::Role::None;
       LOG_I(TAG, "PadDown P%u (ch%u) %+.1f%% [press %u]", e.pad.pos + 1, e.pad.ch, e.pad.delta / 10.0f, e.pad.pressId);
+      identSeq_++; identCh_ = e.pad.ch; identPos_ = (uint8_t)(e.pad.pos + 1);   // §15.3 Identify pads
       if (role == sb::Role::Sound) { view_.pressedPad = (int8_t)sb::soundIndex(cfg_, e.pad.pos); display_.dirty(R_LABELS); }   // §5.2 step 0
       if (mode_ == AppMode::Active || mode_ == AppMode::Dimmed) press_.onPadDown(e.pad.pos, e.pad.pressId, now);           // steps 1, 5-7 or §5.3
       break;
@@ -343,6 +349,7 @@ void AppState::handleEvent(const Event& e, uint32_t now) {
       break;
     case Ev::BtnEdge:
       registerInput(now);
+      if (setupCardShown_ && (e.u32 >> 8)) hideSetupCard(now);
       LOG_D(TAG, "BtnEdge %c %s", (e.u32 & 0xFF) == 0 ? '-' : '+', (e.u32 >> 8) ? "down" : "up");
       break;
     case Ev::ButtonCommand:
@@ -820,10 +827,9 @@ bool AppState::checkCard() {
 
 bool AppState::cardWriteTest(bool psramBuffer, uint32_t chunk, Print& out) {
   if (chunk < 64 || chunk > 4096) chunk = 4096;
-  static uint8_t internalBuf[4096];
-  uint8_t* buf = internalBuf;
-  if (psramBuffer) { buf = static_cast<uint8_t*>(heap_caps_malloc(4096, MALLOC_CAP_SPIRAM)); if (!buf) { out.println("no PSRAM"); return false; } }
-  if (!store_.mountCard()) { out.println("no card"); if (psramBuffer) free(buf); return false; }
+  uint8_t* buf = static_cast<uint8_t*>(heap_caps_malloc(4096, psramBuffer ? MALLOC_CAP_SPIRAM : MALLOC_CAP_INTERNAL));   // on demand: bench only
+  if (!buf) { out.println(psramBuffer ? "no PSRAM" : "no internal RAM"); return false; }
+  if (!store_.mountCard()) { out.println("no card"); free(buf); return false; }
   const char* path = "/sbtest.bin";
   const uint32_t total = 16 * 1024;
   bool ok = true;
@@ -862,7 +868,7 @@ bool AppState::cardWriteTest(bool psramBuffer, uint32_t chunk, Print& out) {
   if (ok && crcW != crcR) { out.println("verify mismatch"); ok = false; }
   out.printf("card write test (%s buffer, %lu-byte writes, %lu Hz): %s\n", psramBuffer ? "PSRAM" : "internal", (unsigned long)chunk, (unsigned long)store_.sdHz(), ok ? "OK" : "FAILED");
   if (!ok) checkCard();
-  if (psramBuffer) free(buf);
+  free(buf);
   return ok;
 }
 
@@ -913,7 +919,10 @@ bool AppState::cardRawTest(uint32_t hz, bool crcOn, bool libSeq, bool lowRegion,
   uint64_t bytes = store_.cardBytes();
   store_.unmountCard();
   if (!bytes) { bytes = 4ULL * 1024 * 1024 * 1024; out.println("  card size unknown: assuming 4 GB"); }
-  static uint8_t orig[32][512], pat[512], back[512];
+  typedef uint8_t Sector[512];
+  static Sector* orig = static_cast<Sector*>(heap_caps_malloc(32 * 512, MALLOC_CAP_SPIRAM));   // bench only; PSRAM (internal RAM is Wi-Fi's, CP-10)
+  static uint8_t pat[512], back[512];
+  if (!orig) { out.println("no PSRAM"); return false; }
   bool ok = true;
   Storage::Guard g;
   s_rawCrc = false;
@@ -1102,7 +1111,7 @@ void AppState::tick() {
         recoveryCheckAt_ = 0;
         if (Board::buttonMinusDown() && Board::buttonPlusDown()) {
           recoveryRequested_ = true;
-          LOG_W(TAG, "recovery requested (both buttons held 3 s): SETUP arrives with Phase 10");
+          LOG_W(TAG, "recovery requested (both buttons held 3 s): SETUP starts with the normal view");
         } else LOG_I(TAG, "recovery prompt released: normal start");
       }
       if (touch_.calibrating() && !hintShown_ && recoveryCheckAt_ == 0) {   // §4.1 fresh calibration: the hint replaces the owner label
@@ -1113,11 +1122,11 @@ void AppState::tick() {
       if (configLoaded_ && recoveryCheckAt_ == 0 && due(now, bootUntil_) && !touch_.calibrating()) enterActive(now);
       break;
     case AppMode::Active:
-      if (hintShown_ && !touch_.calibrating()) { hintShown_ = false; bootScreen_.calibrationHint = false; display_.setScreen(&normalScreen_); }
+      if (hintShown_ && !touch_.calibrating()) { hintShown_ = false; bootScreen_.calibrationHint = false; showHome(); }
       if (cfg_.display.dimAfterS && !hintShown_ && due(now, lastInputMs_ + (uint32_t)cfg_.display.dimAfterS * 1000UL)) enterDimmed(now);
       break;     // Phase 5: sleep/off
     case AppMode::Dimmed:
-      if (hintShown_ && !touch_.calibrating()) { hintShown_ = false; bootScreen_.calibrationHint = false; display_.setScreen(&normalScreen_); }
+      if (hintShown_ && !touch_.calibrating()) { hintShown_ = false; bootScreen_.calibrationHint = false; showHome(); }
       break;
     case AppMode::Menu:                                          // §14: keys and bars are handled above and in the events; sleep and dim are blocked here
       tickMenu(now);
@@ -1126,6 +1135,7 @@ void AppState::tick() {
       break;
   }
   tickOverlays(now);
+  tickSetup(now);                                              // §15: the portal's calls on the app task, its timers and card
 
   if (due(now, next1s_)) { next1s_ = now + 1000; tick1s(now); }
   display_.tick(now);
@@ -1211,6 +1221,10 @@ void AppState::printStatus(Print& out) {
   out.printf("OTA: running %s, state %s | uptime %lu s | boots %lu | crashes %u | reset %d | last input %lu s ago\n",
              run ? run->label : "?", otaStateName(run), (unsigned long)(millis() / 1000), (unsigned long)rtc::get().bootCount,
              (unsigned)rtc::get().crashCount, (int)bi_.reset, (unsigned long)((millis() - lastInputMs_) / 1000));
+  if (setupOn_) out.printf("setup: ON%s | \"%s\" password \"%s\" http://%s/ | %u phone(s) | %lu request(s), last change %lu s ago, idle off after %u min | net stack min free %lu B\n",
+                           setupRecovery_ ? " (recovery)" : "", portal_.ssid(), cfg_.setup.password, portal_.ip(), (unsigned)portal_.clients(), (unsigned long)portal_.requests(),
+                           (unsigned long)((millis() - portal_.lastInputRequestMs()) / 1000), (unsigned)cfg_.setup.idleOffMin, (unsigned long)portal_.netStackMin());
+  else out.printf("setup: off | menu item or `w` starts it | password \"%s\" | idle off after %u min%s\n", cfg_.setup.password, (unsigned)cfg_.setup.idleOffMin, cfg_.setup.pauseKeyboard ? " | keyboard paused during setup" : "");
   out.printf("menu: %s | %u items | hold both %u ms (%s) | timeout %u s%s\n", mode_ == AppMode::Menu ? "OPEN" : "closed", (unsigned)menu_.count(),
              (unsigned)cfg_.menu.holdMs, cfg_.menu.enabled ? "enabled" : "menu.enabled false", (unsigned)cfg_.menu.timeoutS,
              menu_.changed(cfg_) && mode_ == AppMode::Menu ? " | changes pending" : "");

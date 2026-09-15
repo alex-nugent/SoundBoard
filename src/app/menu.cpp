@@ -23,6 +23,7 @@ void AppState::openMenu(const char* why) {
   cmds_.setMenuMode(true);                                     // §4.2 rule 5: the hold that opened it is consumed
   hold_ = sb::HoldProgress(); view_.holdKind = 0; view_.holdPct = 0; view_.holdOffReached = false;
   menu_.first();
+  menu_.setSetupOn(setupOn_);
   menu_.open(cfg_, volume_.master());                          // the snapshot Cancel restores
   menuLastKeyAt_ = now; menuResultUntil_ = 0; menuPairTickAt_ = 0; menuCalibrating_ = false;
   menuView_ = MenuView();
@@ -57,7 +58,7 @@ void AppState::closeMenu(bool save, const char* why) {
   }
   mode_ = AppMode::Active;
   menuCalibrating_ = false;
-  if (!hintShown_) display_.setScreen(&normalScreen_);        // a calibration hint still up: the Active tick restores the view after it
+  if (!hintShown_) showHome();                                 // a calibration hint still up: the Active tick restores the view after it
   display_.setBrightness(cfg_.display.brightnessPct);
   lastInputMs_ = now; levels_.onInput(now);                    // back to ACTIVE with the timers restarted
   refreshView(R_ALL);
@@ -152,9 +153,10 @@ void AppState::menuRunAction(uint32_t now) {                   // the "up" press
       menuCalibrating_ = touch_.calibrating();
       if (!menuCalibrating_) menuResult("NOT POSSIBLE", 3000, now);
       break;
-    case sb::MenuKind::WifiSetup:                              // Phase 10
-      menuResult("NOT AVAILABLE YET", 3000, now);
-      LOG_I(TAG, "Wi-Fi setup arrives with Phase 10");
+    case sb::MenuKind::WifiSetup:                              // §15.1: START twice starts it and the menu closes; STOP once stops it
+      if (setupOn_) { stopSetup("menu item"); menuResult("STOPPED", 2000, now); break; }
+      if (startSetup("menu item", false)) { closeMenu(true, "Wi-Fi setup started"); return; }
+      menuResult("NOT STARTED", 3000, now);
       break;
     case sb::MenuKind::Exit:   closeMenu(true, "Exit item"); return;
     case sb::MenuKind::Cancel: closeMenu(false, "Cancel item"); return;

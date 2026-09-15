@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>SoundBoard settings</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <h1>SoundBoard</h1>
+  <span id="hdrName"></span>
+  <span id="hdrVer" class="ver"></span>
+</header>
+<div id="banner" class="banner" hidden>
+  <b>Recovery mode.</b> The board started with both buttons held. If a setting is wrong you can put every setting back to its default; the levels, sounds, owner label and Wi-Fi are kept.
+  <button id="btnResetRecovery" class="danger">Reset settings</button>
+</div>
+<div id="warnings" class="warnings" hidden></div>
+<nav id="nav"></nav>
+<main>
+
+<section id="status">
+  <h2>Status</h2>
+  <div class="tiles" id="statusTiles"></div>
+  <div id="faults" class="faults"></div>
+</section>
+
+<section id="levels">
+  <h2>Levels</h2>
+  <p class="help">Each level gives the pads a set of sounds. The level pad steps through them; "Set as current" shows a level on the board now.</p>
+  <div id="levelsList"></div>
+  <div class="row-btns"><button id="btnAddLevel">Add a level</button></div>
+</section>
+
+<section id="buttons" data-group="Buttons">
+  <h2>Buttons &amp; levels</h2>
+  <div class="rows"></div>
+</section>
+
+<section id="sounds">
+  <h2>Sounds</h2>
+  <p class="help" id="soundsHelp"></p>
+  <div id="soundAdd" class="row-btns">
+    <label class="btn filebtn" id="btnAddSound">Add a recording<input type="file" id="soundFile" accept="audio/*,.m4a,.caf,.mp3,.wav,.ogg,.opus,.aac"></label>
+    <span id="soundHint" class="muted"></span>
+  </div>
+  <div id="uploadBox" class="upload" hidden>
+    <div id="uploadText"></div>
+    <div class="bar"><i id="uploadBar"></i></div>
+    <button id="btnCancelUpload" class="ghost">Cancel</button>
+  </div>
+  <div id="soundList" class="list"></div>
+</section>
+
+<section id="audio" data-group="Audio">
+  <h2>Audio</h2>
+  <div class="rows"></div>
+  <h3>Cue sounds</h3>
+  <div id="cues" class="rows"></div>
+</section>
+
+<section id="btspk" data-group="Bluetooth speaker">
+  <h2>Bluetooth speaker</h2>
+  <div class="rows"></div>
+  <div id="btStatus" class="statusline"></div>
+  <div class="row-btns">
+    <button id="btnPair">Pair a speaker</button>
+    <button id="btnForgetSpk" class="ghost">Forget all speakers and pair again</button>
+  </div>
+</section>
+
+<section id="keyboard" data-group="Keyboard">
+  <h2>Keyboard (typing to a tablet)</h2>
+  <div class="rows"></div>
+  <div id="kbdStatus" class="statusline"></div>
+  <div class="row-btns"><button id="btnForgetHosts" class="ghost">Forget all keyboard hosts</button></div>
+</section>
+
+<section id="vibration" data-group="Vibration">
+  <h2>Vibration</h2>
+  <div class="rows"></div>
+  <div class="field"><label>Level cue pattern (on, off, on … ms, used when the mode is "pattern")</label>
+    <div class="inline"><input type="text" id="vibPattern" placeholder="200,100,200"><button id="btnBuzzPattern" class="ghost">Buzz</button></div></div>
+  <div class="row-btns"><button id="btnBuzz">Buzz the current level</button></div>
+</section>
+
+<section id="jacks" data-group="Jacks">
+  <h2>Jacks</h2>
+  <p class="help">The four output jacks close a switch while a pad is pressed (or for a pulse). Each jack belongs to a pad.</p>
+  <div class="rows"></div>
+  <div id="jackMap" class="statusline"></div>
+  <div class="row-btns" id="jackTests"></div>
+</section>
+
+<section id="display" data-group="Display">
+  <h2>Display</h2>
+  <p class="help">Colour, flip and brightness show on the board as you change them; Save keeps them.</p>
+  <div class="rows"></div>
+</section>
+
+<section id="power" data-group="Power">
+  <h2>Power</h2>
+  <div class="rows"></div>
+  <h3>Owner label (shown at power-on)</h3>
+  <div id="ownerLabel" class="rows"></div>
+</section>
+
+<section id="device" data-group="Device">
+  <h2>Device</h2>
+  <div class="rows"></div>
+  <div class="row-btns">
+    <button id="btnWifiOff" class="ghost">Turn off setup</button>
+    <button id="btnReset" class="danger">Reset settings</button>
+  </div>
+</section>
+
+<section id="backup">
+  <h2>Backup</h2>
+  <div class="row-btns">
+    <a class="btn" href="/api/config/download" download="config.json">Download config.json</a>
+    <a class="btn ghost" href="/api/config/download?support=1" download="config-support.json">Download for support</a>
+  </div>
+  <p class="help">The full file holds the Wi-Fi passwords; the support copy leaves them out.</p>
+  <div class="field"><label>Upload a config.json</label>
+    <div class="inline"><input type="file" id="cfgFile" accept=".json,application/json"><button id="btnCfgUpload">Upload</button></div>
+    <label class="check"><input type="checkbox" id="cfgFromBoard"> this file came from this board (keep its pad order and revision)</label></div>
+  <div class="row-btns">
+    <a class="btn ghost" href="/api/log?tail=2000&download=1" download="soundboard-log.txt">Download the log</a>
+    <a class="btn ghost" href="/api/coredump" download="soundboard-coredump.bin">Download the crash dump</a>
+  </div>
+</section>
+
+<section id="firmware" data-group="Firmware">
+  <h2>Firmware</h2>
+  <div id="fwStatus" class="statusline"></div>
+  <div class="rows"></div>
+  <p class="help">Updates from the page arrive with the next firmware phase.</p>
+</section>
+
+<section id="diag" data-group="Touch,Diagnostics">
+  <h2>Diagnostics</h2>
+  <div id="diagPads" class="pads"></div>
+  <div class="row-btns">
+    <button id="btnIdentify">Identify pads</button>
+    <button id="btnRecal" class="ghost">Recalibrate pads</button>
+  </div>
+  <div id="identify" class="identify" hidden></div>
+  <div id="diagInfo" class="tiles small"></div>
+  <div class="field"><label>Battery calibration (unit 1): the voltage a meter reads on the battery</label>
+    <div class="inline"><input type="number" id="battVolts" step="0.001" min="3" max="4.5" placeholder="4.12"><button id="btnBattK" class="ghost">Set K</button><button id="btnBattClear" class="ghost">Design divider</button></div></div>
+  <div class="rows"></div>
+  <h3>Log</h3>
+  <div class="row-btns"><button id="btnLog" class="ghost">Refresh</button></div>
+  <pre id="logTail" class="log"></pre>
+</section>
+
+</main>
+<div id="savebar" class="savebar" hidden>
+  <span id="saveText">1 change</span>
+  <button id="btnDiscard" class="ghost">Discard</button>
+  <button id="btnSave">Save</button>
+</div>
+<div id="toast" class="toast"></div>
+<script src="app.js"></script>
+</body>
+</html>

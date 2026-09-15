@@ -198,7 +198,8 @@ bool SoundCache::loadOne(uint16_t idx) {
     mono = static_cast<int16_t*>(heap_caps_malloc((size_t)info.frames * 2, MALLOC_CAP_SPIRAM));
     if (!mono) { heap_caps_free(out); Lock l(mutex_); e_[idx].state = S_STREAM; strlcpy(e_[idx].reason, "PSRAM exhausted", sizeof e_[idx].reason); return false; }
   }
-  static uint8_t chunk[READ_CHUNK];                            // one loader at a time
+  static uint8_t* chunk = static_cast<uint8_t*>(heap_caps_malloc(READ_CHUNK, MALLOC_CAP_SPIRAM));   // one loader at a time; PSRAM (internal RAM is Wi-Fi's, CP-10)
+  if (!chunk) chunk = static_cast<uint8_t*>(malloc(READ_CHUNK));
   uint32_t off = info.dataOffset, left = info.frames * info.channels * 2, outFrames = 0;
   bool ok = true;
   File f;
@@ -261,6 +262,14 @@ uint16_t SoundCache::cachedCount() const {
   uint16_t c = 0;
   for (uint16_t i = 0; i < n_; i++) if (!e_[i].retired && e_[i].state == S_CACHED) c++;
   return c;
+}
+
+bool SoundCache::entry(uint16_t i, SoundEntry& out) const {
+  Lock l(mutex_);
+  if (i >= n_ || e_[i].retired) return false;
+  out = e_[i];
+  out.pcm = nullptr;
+  return true;
 }
 
 void SoundCache::list(Print& out) const {

@@ -50,6 +50,7 @@ class SoundCache {
   uint16_t generation() const { return generation_; }
   bool     allDone() const { return !running_ && scanned_; }
   void     list(Print& out) const;
+  bool     entry(uint16_t i, SoundEntry& out) const;           // a copy under the lock; false past the end or retired (the portal's list, §15.4)
   const char* stateName(uint8_t s) const;
   void     joinLoader();                                     // cancel the loader and wait for it: sleep/off entry, reload
 
