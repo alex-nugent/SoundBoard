@@ -1,4 +1,6 @@
 #include "diag/console.h"
+#include <SD.h>
+#include "hal/storage.h"
 #include "diag/log.h"
 #include "app/state.h"
 #include "config/store.h"
@@ -232,6 +234,13 @@ static void handleLine(char* line, uint32_t now) {
   if (!strcmp(cmd, "sounds")) { s_app->cache().list(Serial); return; }
   if (!strcmp(cmd, "play")) { if (*rest) s_app->playFile(rest); else Serial.println("usage: play <file.wav>"); return; }
   if (!strcmp(cmd, "kbd")) { Serial.printf("keyboard %s (RAM; `save` writes it)\n", s_app->toggleKeyboard() ? "enabled: advertising" : "disabled: host dropped, advertising stopped"); return; }
+  if (!strcmp(cmd, "ls")) {                                    // bench: the card's files with sizes
+    Storage::Guard g;
+    File d = SD.open(*rest ? rest : "/");
+    if (!d || !d.isDirectory()) { Serial.println("no such folder"); return; }
+    for (File f = d.openNextFile(); f; f = d.openNextFile()) Serial.printf("  %-28s %s%lu\n", f.name(), f.isDirectory() ? "<dir> " : "", (unsigned long)f.size());
+    d.close(); return;
+  }
   if (!strcmp(cmd, "crashnow")) { Serial.println("aborting on purpose (CP-12): three inside 2 minutes = safe mode"); Serial.flush(); delay(50); abort(); }
   if (!strcmp(cmd, "bleoff")) { s_app->keyboard().stopStack(); Serial.println("BLE stack stopped until the next boot"); return; }
   if (!strcmp(cmd, "kbdforget")) { s_app->keyboard().forget(); Serial.println("every keyboard host forgotten; forget the board on the host too, then pair again"); return; }
