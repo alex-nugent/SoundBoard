@@ -95,10 +95,20 @@ void AppState::begin(const BootInfo& bi) {
 
   // C. Card, configuration, mirror.
   store_.load(cfg_, rep_);
+  if (bi.safeMode) {                                           // §18 safe mode: the card's configuration is not applied (it may be what crashes)
+    auto hw = cfg_.hardware;
+    sb::config::defaults(cfg_);
+    cfg_.hardware = hw;                                        // the pad map is physical, keep it
+    cfg_.keyboard.enabled = false;
+    cfg_.bluetoothSpeaker.enabled = false;
+    cfg_.audio.cacheMaxMB = 1;
+    setFault(F_SAFE, true);
+  }
   configLoaded_ = true;
   setFault(F_CARD, !store_.cardMounted());
   setFault(F_CONFIG, store_.cardConfigBad());
   Log::setLevel((LogLevel)cfg_.diag.logLevel);
+  Log::setCardSink(cfg_.diag.logToCard && store_.cardMounted() && !bi.safeMode);
   display_.onConfig(cfg_);
   refreshRtcEarly();
   if (store_.loadMessage()[0]) message(store_.loadMessage(), 5000);
@@ -122,14 +132,14 @@ void AppState::begin(const BootInfo& bi) {
   press_.begin(this);
   haptics_.begin(); jacks_.begin();
   haptics_.configure(cfg_); jacks_.configure(cfg_);
-  kbdInitPending_ = true;                                      // G runs from the first tick, after a latched wake press is consumed
+  kbdInitPending_ = !bi.safeMode;                              // G runs from the first tick, after a latched wake press is consumed; never in safe mode
   // E/H. Volume (NVS, else the configuration), the sound cache (loader task), cue at J once the rail is ready.
   volume_.configure(cfg_.audio.maxGain, cfg_.audio.stepPct, cfg_.audio.clickVolume);
   if (sleepWake) { volume_.init(r.volumePct, r.muted); LOG_I(TAG, "volume %u%%%s (RtcState)", (unsigned)volume_.master(), r.muted ? ", muted" : ""); }
   else loadVolume();
   cache_.setBudget((uint32_t)cfg_.audio.cacheMaxMB * 1024u * 1024u);
   refHash_ = SoundCache::referenceHash(cfg_);
-  cache_.reload(cfg_, 0);
+  if (!bi.safeMode) cache_.reload(cfg_, 0);                    // safe mode streams from the card instead
   startupCuePending_ = cfg_.audio.startupCue && bi.kind != BootKind::SleepWake;
   // I. Level 1 and mute cleared on a cold boot and an Off-wake; a sleep-wake restores them (§5.3, §5.4).
   levels_.restore(sleepWake ? r.level : 0); level_ = levels_.current();
@@ -256,6 +266,7 @@ void AppState::registerInput(uint32_t now) {
 // ---------------------------------------------------------------------------
 void AppState::onConfigChanged() {
   Log::setLevel((LogLevel)cfg_.diag.logLevel);
+  Log::setCardSink(cfg_.diag.logToCard && store_.cardMounted() && !bi_.safeMode);
   display_.onConfig(cfg_);
   touch_.onConfig(cfg_);
   cmds_.setDurations(durations());
@@ -1163,6 +1174,7 @@ void AppState::tick() {
 }
 
 void AppState::tick1s(uint32_t now) {
+  Log::cardTick();                                             // §18 diag.logToCard: the ring's new lines to /log.txt when the audio side is idle
   if (msgUntil_ && due(now, msgUntil_)) { msgUntil_ = 0; view_.message[0] = 0; display_.dirty(R_NAME); }
   // §3.2 timeouts, from the last input: off-return after an Off-wake, else SLEEP.
   if ((mode_ == AppMode::Active || mode_ == AppMode::Dimmed) && sleepAllowed()) {

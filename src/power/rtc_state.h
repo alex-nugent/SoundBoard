@@ -37,6 +37,7 @@ bool isCrashReason(esp_reset_reason_t r);       // panic, task WDT, interrupt WD
 void boot(esp_reset_reason_t reason, bool deepSleepWake);
 void commit();                                  // recompute the crc after any change
 void clearCrashes();
+bool safeModeDue();                             // §18: three crashes within 2 minutes (call after boot())
 void setEarlyDefaults();                        // the §13.3 defaults for the early-boot settings
 
 }  // namespace rtc

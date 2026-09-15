@@ -25,6 +25,8 @@ void tail(int lines, Print& out);               // the last N lines of the ring
 bool hostConnected();                           // USB plugged, CDC connected, and a terminal has sent a byte
 void hostActivity();                            // the console saw a byte from the host
 uint32_t bytesLogged();
+void setCardSink(bool on);                      // §18 diag.logToCard: append new lines to /log.txt on the card (cardTick() does the writes)
+void cardTick();                                // app task, once a second: at most 4 KB per call, only when the audio side is idle
 
 }  // namespace Log
 

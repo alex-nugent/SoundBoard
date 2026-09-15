@@ -45,6 +45,7 @@ struct BootInfo {
   uint8_t  wakeTouchGpio = 0;            // a touch wake: the waking channel's GPIO (§4.1 latched wake press), 0 = not identified
   uint32_t touchActiveMask = 0;          // the sensor's active-channel mask at app start (bit n = touch channel n)
   uint8_t  wakeButtons = 0;              // an ext1 wake: bit 0 minus, bit 1 plus
+  bool     safeMode = false;             // §18: three crashes within 2 minutes → defaults, no BLE, no cache, SETUP reachable
 };
 
 enum class AppMode : uint8_t { Boot, Active, Dimmed, Menu, Updating, Fault };

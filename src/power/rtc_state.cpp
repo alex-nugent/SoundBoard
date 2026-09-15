@@ -62,4 +62,10 @@ void commit() { g_rtc.crc = computeCrc(); }
 
 void clearCrashes() { g_rtc.crashCount = 0; g_rtc.firstCrashUs = 0; commit(); }
 
+bool safeModeDue() {                            // the system clock runs on through panic and watchdog resets
+  if (g_rtc.crashCount < 3) return false;
+  int64_t span = nowUs() - g_rtc.firstCrashUs;
+  return span >= 0 && span < 120LL * 1000000LL;
+}
+
 }  // namespace rtc

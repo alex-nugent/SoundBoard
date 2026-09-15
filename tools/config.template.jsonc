@@ -1,0 +1,40 @@
+// The configuration every converted card starts from (FirmwareSpec §13.6: Annalise's
+// decided values; everything not listed takes the defaults of §13.3). convert_sounds.py
+// strips these comments, fills `levels` from a V3 config.txt when asked, and writes
+// config.json next to /sounds. Edit here, not in the generated file.
+{
+  "schema": 1,
+  "device": {
+    "name": "SoundBoard V4",
+    "ownerLabel": ["If found please call", "(phone number)"],   // [OPEN 3] the family's number
+    "ownerLabelMs": 2000
+  },
+  "hardware": { "revision": "A", "padChannels": [2, 3, 4, 5] },   // set with the page's Identify pads
+  "pads": { "roles": ["level", "sound", "sound", "sound"] },
+  "press": { "interrupt": true, "repeatWhileHeld": false, "repeatDelayMs": 250, "levelRepeatWhileHeld": false },
+  "levelChange": { "returnToFirstAfterS": 20, "returnCue": true, "click": true,
+                   "vibration": { "mode": "count", "pulseMs": 150, "gapMs": 150 } },
+  "audio": { "volumePct": 60, "clickVolume": 2,                   // her V3 card had click 2 [OPEN 12]
+             "outputs": { "speakers": false },
+             "cues": { "startup": "_startup.wav", "click": "_click.wav", "saved": "_saved.wav" } },
+  "bluetoothSpeaker": { "enabled": false },
+  "keyboard": { "enabled": false },                                // her V3 card had it off [OPEN 4]
+  "vibration": { "enabled": true, "strengthPct": 100, "confirmPulse": false },
+  "display": { "theme": "amber", "dimAfterS": 30, "showLabels": true },
+  "power": { "sleepAfterMin": 5, "offHoldMs": 1000 },
+  "setup": { "password": "soundboard" },                          // change before the unit ships
+  "levels": [
+    { "name": "ONE",    "buttons": [ { "sound": "yes.wav",      "label": "Yes" },
+                                     { "sound": "maybe.wav",    "label": "Maybe" },
+                                     { "sound": "no.wav",       "label": "No" } ] },
+    { "name": "TWO",    "buttons": [ { "sound": "choices.wav",  "label": "Choices" },
+                                     { "sound": "letters.wav",  "label": "Letters" },
+                                     { "sound": "numbers.wav",  "label": "Numbers" } ] },
+    { "name": "VOLUME", "buttons": [ { "action": "volumeDown", "label": "Quieter" },
+                                     { "action": "mute",       "label": "Mute" },
+                                     { "action": "volumeUp",   "label": "Louder" } ] },
+    { "name": "FOUR",   "buttons": [ { "sound": "hello.wav",    "label": "Hello" },
+                                     { "sound": "thankyou.wav", "label": "Thank you" },
+                                     { "sound": "goodbye.wav",  "label": "Goodbye" } ] }
+  ]
+}

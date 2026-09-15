@@ -257,6 +257,26 @@ After an OTA, a USB reflash needs the OTA record erased
 slot. Releases are built by `.github/workflows/release.yml` from a tag pushed
 with `tools/publish.sh vX.Y.Z` (Alex runs it).
 
+Hardening (Phase 12, §18): panic, task-watchdog and interrupt-watchdog
+resets count in `RtcState` (5 min of uptime clears the count); the third
+inside two minutes boots **safe mode**: the card's configuration is read but
+not applied (defaults, the pad map kept), no keyboard, no Bluetooth speaker,
+no sound cache (sounds stream), `!SAFE` on the bottom line and the portal's
+status card, and the menu's Wi-Fi setup still reachable. `diag.logToCard`
+appends the log ring to `/log.txt` on the card once a second when the storage
+lock is free (rolls to `/log.old` at 512 KB). Console `crashnow` aborts on
+purpose for the CP-12 check. The fault table (`src/app/faults.h`) drives the
+bottom line and the portal; `GET /api/coredump` serves the last core dump.
+
+Card tools (Phase 13, §20): `tools/convert_sounds.py <src> <card> [--config
+<V3 config.txt> --skip-level N --volume-level N]` converts every recording
+ffmpeg reads to the canonical WAV (peak −1 dBFS, edges trimmed at −50 dBFS
+with 20 ms kept) and writes `config.json` from `tools/config.template.jsonc`,
+importing V3 levels when asked; `--self-test` checks two synthetic files.
+`tools/make_card.py <card>` verifies the folder against the firmware's own
+settings table (paths, ranges, enums, string lengths), the levels and their
+sound references, the cues and every WAV.
+
 Bluetooth LE keyboard (Phase 7): the board advertises as `device.name`
 (default `SoundBoard V4`) whenever `keyboard.enabled` and no host is
 connected; pair from the host's Bluetooth settings ("Just Works", no

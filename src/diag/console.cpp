@@ -45,6 +45,7 @@ static void printHelp() {
   Serial.println("  kbdtype <text>    bench: type text to the host    kbdkey <NAME> [ms]   bench: tap a key, or hold it for ms (Appendix B names)");
   Serial.println("  m                 open the Quick Menu (m again: exit and save); in it: 1 back, 2 or - down, 3 or + up / OK, 4 next");
   Serial.println("  w                 Wi-Fi setup on / off (the AP, the page at http://192.168.4.1)");
+  Serial.println("  crashnow          abort() on purpose: three inside 2 minutes boot safe mode (CP-12)");
   Serial.println("  wifi <ssid> <pw>  join the home Wi-Fi (also stored in RAM as wifi.*; `save` keeps it)    fw check|install [ver]|rollback|cancel|status   updates (§16)");
   Serial.println();
 }
@@ -231,6 +232,7 @@ static void handleLine(char* line, uint32_t now) {
   if (!strcmp(cmd, "sounds")) { s_app->cache().list(Serial); return; }
   if (!strcmp(cmd, "play")) { if (*rest) s_app->playFile(rest); else Serial.println("usage: play <file.wav>"); return; }
   if (!strcmp(cmd, "kbd")) { Serial.printf("keyboard %s (RAM; `save` writes it)\n", s_app->toggleKeyboard() ? "enabled: advertising" : "disabled: host dropped, advertising stopped"); return; }
+  if (!strcmp(cmd, "crashnow")) { Serial.println("aborting on purpose (CP-12): three inside 2 minutes = safe mode"); Serial.flush(); delay(50); abort(); }
   if (!strcmp(cmd, "bleoff")) { s_app->keyboard().stopStack(); Serial.println("BLE stack stopped until the next boot"); return; }
   if (!strcmp(cmd, "kbdforget")) { s_app->keyboard().forget(); Serial.println("every keyboard host forgotten; forget the board on the host too, then pair again"); return; }
   if (!strcmp(cmd, "kbdtype")) {

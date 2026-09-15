@@ -5,6 +5,8 @@
 #include "power/rtc_state.h"
 #include <stdarg.h>
 #include <string.h>
+#include <SD.h>
+#include "hal/storage.h"
 
 namespace Log {
 
@@ -110,6 +112,34 @@ void printf(LogLevel level, const char* tag, const char* fmt, ...) {
   line[len++] = '\n';
   line[len] = 0;
   write(line, len);
+}
+
+// --- the card log (§18 diag.logToCard) ---------------------------------------------------------
+// Ring bytes not yet on the card go to /log.txt in one append per second, under the storage lock and only
+// when the lock is free within 50 ms (a card write during playback is what the lock protects against).
+// /log.txt rolls to /log.old at 512 KB. Nothing here blocks logging itself: the ring is the source, this drains it.
+static bool     s_card = false;
+static uint32_t s_cardSent = 0;
+static bool     s_cardFailed = false;
+void setCardSink(bool on) {
+  if (on && !s_card) { s_cardSent = s_head > ringSize() ? s_head - ringSize() : 0; s_cardFailed = false; }   // whatever the ring still holds goes first
+  s_card = on;
+}
+void cardTick() {
+  if (!s_card || s_cardFailed || !s_ring || s_cardSent >= s_head) return;
+  if (!Storage::tryLock(50)) return;                           // busy: next second
+  uint32_t sz = ringSize();
+  if (s_head - s_cardSent > sz) s_cardSent = s_head - sz;       // fell behind by more than the ring: skip
+  uint32_t n = s_head - s_cardSent; if (n > 4096) n = 4096;
+  File f = SD.open("/log.txt", FILE_APPEND);
+  if (!f) { s_cardFailed = true; Storage::unlock(); note("card log: /log.txt would not open, card logging off"); return; }
+  if (f.size() > 512 * 1024) { f.close(); SD.remove("/log.old"); SD.rename("/log.txt", "/log.old"); f = SD.open("/log.txt", FILE_APPEND); if (!f) { s_cardFailed = true; Storage::unlock(); return; } }
+  uint32_t off = s_cardSent % sz, first = sz - off < n ? sz - off : n;
+  f.write(s_ring + off, first);
+  if (n > first) f.write(s_ring, n - first);
+  f.close();
+  s_cardSent += n;
+  Storage::unlock();
 }
 
 void tick() {

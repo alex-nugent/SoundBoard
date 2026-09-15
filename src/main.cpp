@@ -70,6 +70,7 @@ void setup() {
   bool deepWake  = bootInfo.reset == ESP_RST_DEEPSLEEP && bootInfo.wake != ESP_SLEEP_WAKEUP_UNDEFINED;
   rtc::boot(bootInfo.reset, deepWake);
   bootInfo.rtcValid = rtc::valid();
+  bootInfo.safeMode = rtc::safeModeDue();          // §18: the third crash inside 2 minutes
 
   // Step 4: recovery check (never on a deep-sleep wake).
   bootInfo.bothButtonsAtReset = !deepWake && Board::buttonMinusDown() && Board::buttonPlusDown();
@@ -105,6 +106,7 @@ void setup() {
         resetName(bootInfo.reset), wakeName(bootInfo.wake), (unsigned long)rtc::get().bootCount,
         (unsigned)rtc::get().crashCount, rtc::isCrashReason(bootInfo.reset) ? " (this boot follows a crash)" : "",
         bootInfo.rtcValid ? "kept" : "reset");
+  if (bootInfo.safeMode) LOG_E("boot", "SAFE MODE: %u crashes within 2 minutes: defaults, no keyboard, no sound cache; the counter clears after 5 min up", (unsigned)rtc::get().crashCount);
   LOG_I("boot", "app start +%lu ms | serial wait %lu ms (USB %s) | recovery prompt %s",
         (unsigned long)bootInfo.appStartMs, (unsigned long)bootInfo.serialWaitMs, Board::usbPresent() ? "present" : "absent",
         bootInfo.bothButtonsAtReset ? "shown" : "no");
