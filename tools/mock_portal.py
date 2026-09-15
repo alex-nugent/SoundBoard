@@ -2,7 +2,7 @@
 # A desktop stand-in for the board (FirmwareSpec.md §15.3: "the page is
 # developed in a desktop browser against a mock /api/* JSON"). Serves
 # data/portal/ unbuilt and answers every endpoint of §15.4 (Phase 10) from
-# memory, starting from examples/config.annalise.json.
+# memory, starting from examples/config.example.json.
 #
 #   python3 tools/mock_portal.py [port]     then open http://localhost:8080/
 import json, os, re, sys, time, threading
@@ -43,7 +43,7 @@ def strip_comments(s):
     s = re.sub(r"//[^\n]*", "", s)
     return re.sub(r"/\*.*?\*/", "", s, flags=re.S)
 
-CFG = json.loads(strip_comments(open(os.path.join(ROOT, "examples", "config.annalise.json")).read()))
+CFG = json.loads(strip_comments(open(os.path.join(ROOT, "examples", "config.example.json")).read()))
 CFG.setdefault("revision", 26)
 CFG.setdefault("setup", {"password": "soundboard", "idleOffMin": 10, "pauseKeyboard": False})
 CFG.setdefault("wifi", {"ssid": "", "password": ""})

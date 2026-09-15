@@ -1,9 +1,15 @@
 # SoundBoard V4 firmware
 
-Product firmware for the V4 PCB (ESP32-S3 on an Unexpected Maker ProS3).
-Built from `../spec/v4/FirmwareSpec.md` in the phases of
-`../spec/v4/ImplementationPlan.md`. Hardware facts and rules:
-`../briefs/FirmwareBrief.md`.
+Product firmware for the V4 PCB (ESP32-S3 on an Unexpected Maker ProS3): a
+four-pad talking board for someone who cannot speak, with levels of sounds,
+Bluetooth typing to a tablet, a Bluetooth speaker, vibration cues, output
+jacks, a phone settings page and updates over Wi-Fi. Built from the
+FirmwareSpec (`../spec/v4/`, in the private design repository; the section
+numbers in the comments refer to it). This directory is published as
+`alex-nugent/SoundBoard` so boards can fetch releases. It is not open source: see `LICENSE`, which is short.
+Releases: `tools/publish.sh v1.2.0` from the design repository pushes this
+tree and tags it, and the workflow in `.github/workflows/release.yml` builds
+the image, `manifest.json` and the `.elf`.
 
 ## Build, flash, test
 
@@ -32,7 +38,7 @@ tools/mock_portal.py  a desktop stand-in for the board's /api/* so the page runs
 tools/page_check.mjs  drives the page in headless Chrome against the mock (node tools/page_check.mjs)
 data/portal/          the settings page: index.html, style.css, app.js
 src/net/              portal.* (AP, DNS, mDNS, the net task, the app-task bridge), api.cpp (the endpoints)
-examples/             config.annalise.json (spec §13.6) and its one-line `merge` form
+examples/             config.example.json (the first owner's configuration, spec §13.6) and its one-line `merge` form
 ```
 
 ## Console
@@ -70,7 +76,7 @@ two-tone. Sounds go in `/sounds/` on the card in the canonical format;
 checks them against a `config.json`.
 
 Levels and presses (Phase 4): a console press is a full press. With
-Annalise's configuration `1` is the level pad (next level, wrap, the click
+In the example configuration `1` is the level pad (next level, wrap, the click
 cue), `2`-`4` run the entry on the current level: a sound, or on level 3
 Louder / Mute / Quieter (the click at the new master volume; Mute stops the
 sound and shows MUTE, the next volume change un-mutes with a click). `++`
@@ -249,8 +255,8 @@ and `kbdkey <NAME> [ms]` send from the bench; `s` adds a keyboard line
 queue). The BLE init runs from the first app tick, after a latched wake
 press is consumed, so it does not delay a wake-and-play.
 
-To put Annalise's configuration on the card without opening the case, paste
-the single line in `examples/config.annalise.oneline.txt` into the monitor,
+To put the example configuration on the card without opening the case, paste
+the single line in `examples/config.example.oneline.txt` into the monitor,
 then `save`.
 
 ## Bench commands (not in the spec; for the SD investigation of 2026-09-13)

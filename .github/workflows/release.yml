@@ -1,0 +1,55 @@
+# Builds a release of the SoundBoard firmware (FirmwareSpec.md §16, §19.11).
+# A tag `v*` pushed to this repository builds the image, writes manifest.json
+# and attaches both (and the .elf for crash dumps) to a GitHub release. The
+# board reads `releases/latest` (or a tag) from `update.repo` to update itself.
+# A pull request only builds.
+name: release
+on:
+  push:
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }            # git describe needs the tags
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.12' }
+      - name: PlatformIO
+        run: pip install platformio==6.1.16
+      - name: Host tests
+        run: pio test -e native
+      - name: Build
+        run: pio run -e pros3
+      - name: Manifest
+        id: manifest
+        run: |
+          VERSION="${GITHUB_REF_NAME}"
+          case "$VERSION" in v*) ;; *) VERSION="dev-$(git describe --tags --always)";; esac
+          BIN=.pio/build/pros3/firmware.bin
+          cp "$BIN" "soundboard-${VERSION}.bin"
+          cp .pio/build/pros3/firmware.elf "soundboard-${VERSION}.elf"
+          python3 tools/manifest.py "$VERSION" "soundboard-${VERSION}.bin" > manifest.json
+          cat manifest.json
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: firmware
+          path: |
+            soundboard-*.bin
+            soundboard-*.elf
+            manifest.json
+      - name: Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            soundboard-${{ steps.manifest.outputs.version }}.bin
+            soundboard-${{ steps.manifest.outputs.version }}.elf
+            manifest.json
+          body_path: RELEASE_NOTES.md
+          fail_on_unmatched_files: true

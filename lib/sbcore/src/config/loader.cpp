@@ -210,7 +210,7 @@ static void defaultOwnerLabel(Config& c) {
   memset(c.device.ownerLabel, 0, sizeof c.device.ownerLabel);
   copyStr(c.device.ownerLabel[0], 21, "If found please call");
   copyStr(c.device.ownerLabel[1], 21, "(phone number)");
-  c.device.ownerLines = 2;      // TODO(OPEN-3): exact text for Annalise's unit
+  c.device.ownerLines = 2;      // TODO(OPEN-3): exact text for the first unit
 }
 
 static void loadOwnerLabel(JsonVariantConst root, Config& c, ConfigReport& rep) {

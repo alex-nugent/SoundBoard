@@ -70,13 +70,13 @@ void test_load_example() {
   TEST_ASSERT_EQUAL((int)Tri::Inherit, (int)cfg.levels.levels[0].buttons[0].vibrate);
   TEST_ASSERT_EQUAL((int)JackMode::Inherit, (int)cfg.levels.levels[0].buttons[0].jack);
   TEST_ASSERT_FALSE(cfg.touch.hasPadPressPct);
-  TEST_ASSERT_EQUAL_STRING("alexnugent/SoundBoardV4", cfg.update.repo);
+  TEST_ASSERT_EQUAL_STRING("alex-nugent/SoundBoard", cfg.update.repo);
 }
 
-// ---- Annalise's file (§13.6) ---------------------------------------------------
-void test_load_annalise() {
+// ---- The owner's file (§13.6) ---------------------------------------------------
+void test_load_owner_file() {
   JsonDocument doc;
-  TEST_ASSERT_TRUE(parse(doc, SAMPLE_ANNALISE));
+  TEST_ASSERT_TRUE(parse(doc, SAMPLE_OWNER));
   TEST_ASSERT_TRUE(config::load(doc.as<JsonVariantConst>(), cfg, rep));
   dumpReport(rep);
   TEST_ASSERT_EQUAL_MESSAGE(0, rep.count, "her file must load without warnings");
@@ -159,7 +159,7 @@ void test_goto_clamped_after_level_removal() {
 // ---- partial PUT ----------------------------------------------------------------
 void test_partial_put_rejected_as_whole() {
   JsonDocument live;
-  TEST_ASSERT_TRUE(parse(live, SAMPLE_ANNALISE));
+  TEST_ASSERT_TRUE(parse(live, SAMPLE_OWNER));
   TEST_ASSERT_TRUE(config::load(live.as<JsonVariantConst>(), cfg, rep));
   uint16_t before = cfg.power.offHoldMs;
 
@@ -300,7 +300,7 @@ int main(int, char**) {
   RUN_TEST(test_save_into_empty_document);
   RUN_TEST(test_defaults);
   RUN_TEST(test_load_example);
-  RUN_TEST(test_load_annalise);
+  RUN_TEST(test_load_owner_file);
   RUN_TEST(test_clamp_out_of_range);
   RUN_TEST(test_drop_malformed_level);
   RUN_TEST(test_goto_clamped_after_level_removal);

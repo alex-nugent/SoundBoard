@@ -103,7 +103,7 @@ const SettingDesc SETTINGS[] = {
 
   { "wifi.ssid",                       SType::String,  FIELD(wifi.ssid),               0,     32,     1,    "",              nullptr,                                nullptr,                     "Home Wi-Fi network",              "Firmware",    P,               0 },
   { "wifi.password",                   SType::String,  FIELD(wifi.password),           0,     64,     1,    "",              nullptr,                                nullptr,                     "Home Wi-Fi password",             "Firmware",    P,               0 },
-  { "update.repo",                     SType::String,  FIELD(update.repo),             0,     64,     1,    "alexnugent/SoundBoardV4", nullptr,                      nullptr,                     "Update repository",               "Firmware",    PA,              0 },   // TODO(OPEN-14)
+  { "update.repo",                     SType::String,  FIELD(update.repo),             0,     64,     1,    "alex-nugent/SoundBoard", nullptr,                      nullptr,                     "Update repository",               "Firmware",    PA,              0 },   // the public releases repository (OPEN-14 closed 2026-09-14)
   { "update.channel",                  SType::String,  FIELD(update.channel),          1,     24,     1,    "latest",        nullptr,                                nullptr,                     "Update channel",                  "Firmware",    PA,              0 },
 
   { "diag.logToCard",                  SType::Bool,    FIELD(diag.logToCard),          0,     1,      1,    "false",         nullptr,                                nullptr,                     "Log to the card",                 "Diagnostics", PLA,             0 },

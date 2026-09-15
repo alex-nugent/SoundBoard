@@ -32,7 +32,7 @@ static const char* SAMPLE_EXAMPLE = R"JSON({
   "menu": { "enabled": true, "holdMs": 3000, "timeoutS": 30 },
   "setup": { "password": "soundboard", "idleOffMin": 10, "pauseKeyboard": false },
   "wifi": { "ssid": "", "password": "" },
-  "update": { "repo": "alexnugent/SoundBoardV4", "channel": "latest" },
+  "update": { "repo": "alex-nugent/SoundBoard", "channel": "latest" },
   "diag": { "logToCard": false, "logLevel": "info" },
   "custom": { "keep": "me" },
   "levels": [
@@ -50,8 +50,8 @@ static const char* SAMPLE_EXAMPLE = R"JSON({
   ]
 })JSON";
 
-// §13.6: Annalise's initial configuration.
-static const char* SAMPLE_ANNALISE = R"JSON({
+// §13.6: the first owner's initial configuration.
+static const char* SAMPLE_OWNER = R"JSON({
   "schema": 1,
   "device": { "name": "SoundBoard V4", "ownerLabel": ["If found please call", "(phone number)"], "ownerLabelMs": 2000 },
   "hardware": { "revision": "A", "padChannels": [2, 3, 4, 5] },
