@@ -264,8 +264,8 @@ not applied (defaults, the pad map kept), no keyboard, no Bluetooth speaker,
 no sound cache (sounds stream), `!SAFE` on the bottom line and the portal's
 status card, and the menu's Wi-Fi setup still reachable. `diag.logToCard`
 appends the log ring to `/log.txt` on the card once a second when the storage
-lock is free (rolls to `/log.old` at 512 KB). Console `crashnow` aborts on
-purpose for the CP-12 check and `ls [folder]` lists the card. The fault table (`src/app/faults.h`) drives the
+lock is free (rolls to `/log.old` at 512 KB). Console `crash` (three inside
+2 minutes) proves it and `ls [folder]` lists the card. The fault table (`src/app/faults.h`) drives the
 bottom line and the portal; `GET /api/coredump` serves the last core dump.
 
 Card tools (Phase 13, §20): `tools/convert_sounds.py <src> <card> [--config
