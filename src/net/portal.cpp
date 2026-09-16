@@ -98,7 +98,6 @@ void Portal::netMain() {
   while (running_) {
     server_->handleClient();
     dns_->processNextRequest();
-    if (!app_->updater().ownTask()) app_->updater().tick(true);   // §15.4: one bounded job step per pass
     vTaskDelay(1);
   }
   netDone_ = true;

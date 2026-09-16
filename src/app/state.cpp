@@ -1166,7 +1166,7 @@ void AppState::tick() {
   }
   tickOverlays(now);
   tickSetup(now);                                              // §15: the portal's calls on the app task, its timers and card
-  if (!portal_.running()) updater_.tickApp();                  // §16: a job while SETUP is off gets its own task; the net task runs the steps while SETUP is on
+  updater_.tickApp();                                          // §16: a running job always has its own task
 
   if (due(now, next1s_)) { next1s_ = now + 1000; tick1s(now); }
   display_.tick(now);

@@ -9,7 +9,7 @@ numbers in the comments refer to it). This directory is published as
 `alex-nugent/SoundBoard` so boards can fetch releases. It is not open source: see `LICENSE`, which is short.
 Releases: `tools/publish.sh v1.2.0` from the design repository pushes this
 tree and tags it, and the workflow in `.github/workflows/release.yml` builds
-the image, `manifest.json` and the `.elf`.
+the image, `manifest.json` and the `.elf`. Steps in `RELEASE_README.md`.
 
 ## Build, flash, test
 

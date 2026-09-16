@@ -80,6 +80,15 @@ static void hNotFound() {
   if (S->uri().startsWith("/api/")) { P->noteRequest(false); sendError(404, "no such endpoint"); return; }
   hRedirect();
 }
+// The connectivity probes get the answer the OS expects from the open internet, so no sign-in sheet or window
+// opens on any device (bench 2026-09-16: macOS's window cancels the join, iOS's sheet cannot pick files, and both
+// confused the family). The user opens the browser at the address on the board's screen; the DNS catch-all still
+// lands any typed address on the page.
+static void hProbeApple()   { P->noteRequest(false); S->sendHeader("Cache-Control", "no-store"); S->send(200, "text/html", "<HTML><HEAD><TITLE>Success</TITLE></HEAD><BODY>Success</BODY></HTML>"); }
+static void hProbe204()     { P->noteRequest(false); S->sendHeader("Cache-Control", "no-store"); S->send(204, "text/plain", ""); }
+static void hProbeMsTest()  { P->noteRequest(false); S->send(200, "text/plain", "Microsoft Connect Test"); }
+static void hProbeNcsi()    { P->noteRequest(false); S->send(200, "text/plain", "Microsoft NCSI"); }
+static void hProbeOk()      { P->noteRequest(false); S->send(200, "text/plain", "OK"); }
 
 // ---------------------------------------------------------------------------
 // Schema (the descriptor table, §13.5) and the fixed lists the page needs
@@ -264,6 +273,9 @@ static void hWifiScan() {                                     // blocking, ~2-4 
     if (dup) continue;
     JsonObject o = arr.add<JsonObject>(); o["ssid"] = WiFi.SSID(i); o["rssi"] = WiFi.RSSI(i); o["open"] = WiFi.encryptionType(i) == WIFI_AUTH_OPEN;
   }
+  { char list[200] = ""; size_t o = 0;
+    for (JsonObject x : arr) o += snprintf(list + o, o < sizeof list ? sizeof list - o : 0, "%s\"%s\" %d", o ? ", " : "", (const char*)x["ssid"], (int)x["rssi"]);
+    LOG_I("net", "scan: %d result(s), station %s: %s", n, WiFi.status() == WL_CONNECTED ? "joined" : "not joined", list); }
   WiFi.scanDelete();
   BufPrint out(P->buf(), P->bufCap()); serializeJson(d, out); sendBuf(200, "application/json");
 }
@@ -279,13 +291,20 @@ static void hFwUploadData() {
   Updater& u = P->app().updater();
   if (up.status == UPLOAD_FILE_START) {
     s_fwUpErr[0] = 0;
+    long size = S->hasArg("size") ? atol(S->arg("size").c_str()) : 0;   // the page sends the file's own size: Content-Length counts the multipart wrapping too
     int cl = S->clientContentLength();
-    s_fwUpOk = u.uploadStart(cl > 0 ? (size_t)cl : 0, s_fwUpErr, sizeof s_fwUpErr);
+    s_fwUpOk = size > 0 ? u.uploadStart((size_t)size, true, s_fwUpErr, sizeof s_fwUpErr) : u.uploadStart(cl > 0 ? (size_t)cl : 0, false, s_fwUpErr, sizeof s_fwUpErr);
   } else if (up.status == UPLOAD_FILE_WRITE) { if (s_fwUpOk && !u.uploadWrite(up.buf, up.currentSize)) { s_fwUpOk = false; sb::copyStr(s_fwUpErr, sizeof s_fwUpErr, u.error()); } }
   else if (up.status == UPLOAD_FILE_END) { if (s_fwUpOk) s_fwUpOk = u.uploadEnd(s_fwUpErr, sizeof s_fwUpErr); }
   else if (up.status == UPLOAD_FILE_ABORTED) { u.uploadAbort("connection lost"); s_fwUpOk = false; sb::copyStr(s_fwUpErr, sizeof s_fwUpErr, "upload stopped"); }
 }
-static void hFwUploadDone() { P->noteRequest(true); replyJob(s_fwUpOk, s_fwUpErr[0] ? s_fwUpErr : "upload failed"); }
+static void hFwUploadDone() {
+  P->noteRequest(true);
+  if (!s_fwUpOk) { sendError(400, s_fwUpErr[0] ? s_fwUpErr : "upload failed"); return; }
+  BufPrint out(P->buf(), 1024);
+  out.print("{\"ok\":true,\"job\":\""); out.print(P->app().updater().jobName()); out.print("\",\"version\":\""); out.print(P->app().updater().stagedVersion()); out.print("\"}");
+  sendBuf(200, "application/json");
+}
 
 // ---------------------------------------------------------------------------
 // Sounds
@@ -492,10 +511,11 @@ void bind(Portal& p) {
   S->on("/api/sounds/rename", HTTP_POST, hSoundRename);
   S->on("/api/play", HTTP_POST, hPlay);
   S->on("/api/action", HTTP_POST, hAction);
-  // Captive-portal probes (validation 11): a redirect makes the OS open its sign-in sheet on the page.
-  for (const char* path : { "/generate_204", "/gen_204", "/hotspot-detect.html", "/library/test/success.html", "/connecttest.txt",
-                            "/ncsi.txt", "/redirect", "/canonical.html", "/success.txt", "/fwlink", "/check_network_status.txt" })
-    S->on(path, hRedirect);
+  // Connectivity probes answered as the open internet would: no sign-in sheet or window on any device.
+  for (const char* path : { "/hotspot-detect.html", "/library/test/success.html" }) S->on(path, hProbeApple);   // Apple
+  for (const char* path : { "/generate_204", "/gen_204" }) S->on(path, hProbe204);                             // Android, Chrome
+  S->on("/connecttest.txt", hProbeMsTest); S->on("/ncsi.txt", hProbeNcsi);                                      // Windows
+  for (const char* path : { "/redirect", "/canonical.html", "/success.txt", "/fwlink", "/check_network_status.txt" }) S->on(path, hProbeOk);   // Firefox, others
   S->onNotFound(hNotFound);
 }
 

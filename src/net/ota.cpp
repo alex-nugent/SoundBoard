@@ -28,6 +28,7 @@
 #endif
 
 static const char* TAG = "ota";
+static constexpr int      MIN_RSSI = -70;            // an internet update needs a usable link: -72…-77 took 82 s with no drops, -76 and worse never connected (bench)
 static constexpr uint32_t JOIN_TIMEOUT_MS = 90000;   // a weak link misses beacons: the driver needs several scans
 static constexpr size_t   CHUNK = 4096;                     // one bounded step (§15.4)
 static constexpr uint32_t APP_SLOT = 0x640000;              // default_16MB.csv
@@ -55,6 +56,7 @@ static void* psCalloc(size_t n, size_t size) {
 }
 void Updater::begin(AppState& app, Portal& portal) {
   app_ = &app; portal_ = &portal;
+  appTask_ = xTaskGetCurrentTaskHandle();
   WiFi.onEvent(staEvent);
   mbedtls_platform_set_calloc_free(psCalloc, free);
 }
@@ -67,6 +69,12 @@ const char* Updater::jobName() const {
   }
 }
 bool Updater::staConnected() const { return WiFi.status() == WL_CONNECTED; }
+bool Updater::linkTooWeak(char* err, size_t n) const {          // the rule the manual states: no internet update below MIN_RSSI
+  int rssi = WiFi.RSSI();
+  if (rssi >= MIN_RSSI) return false;
+  snprintf(err, n, "the Wi-Fi signal is too weak here (%d dBm, needs %d or better): move the board closer to the router, or install from a file", rssi, MIN_RSSI);
+  return true;
+}
 
 void Updater::fail(const char* fmt, ...) {
   va_list ap; va_start(ap, fmt); vsnprintf(err_, sizeof err_, fmt, ap); va_end(ap);
@@ -75,14 +83,25 @@ void Updater::fail(const char* fmt, ...) {
   LOG_E(TAG, "%s", err_);
   if (http_) { Http h; h.h = (esp_http_client_handle_t)http_; httpClose(h); }
   if (Update.isRunning()) Update.abort();
+  stopStationIfDown();
   if (updating_) leaveUpdating(err_);
+}
+// A station that keeps looking for a network it cannot reach scans every channel, and the soft AP is off the air
+// while it does: the phone's page stalls (bench, 2026-09-16). Once a job has failed or been cancelled, a station that
+// is not connected is stopped; the next join switches auto-reconnect back on.
+void Updater::stopStationIfDown() {
+  if (staConnected()) return;
+  WiFi.setAutoReconnect(false);
+  WiFi.disconnect(false);
+  joinStartedAt_ = 0;
+  LOG_I(TAG, "station stopped (not connected)");
 }
 void Updater::setText(const char* fmt, ...) { va_list ap; va_start(ap, fmt); vsnprintf(text_, sizeof text_, fmt, ap); va_end(ap); }
 
 // The app-task hooks: direct when tick() runs on the app task, through the portal's bridge from the net task.
 struct HookCtx { Updater* u; const char* why; void (*fn)(Updater*, const char*); };
 void Updater::onApp(void (*fn)(Updater*, const char*), const char* arg) {
-  if (!onNet_) { fn(this, arg); return; }
+  if (xTaskGetCurrentTaskHandle() == appTask_) { fn(this, arg); return; }   // the console's commands run there; the bridge would wait on itself
   HookCtx c = { this, arg, fn };
   portal_->callOnApp([](void* p) { HookCtx* c = static_cast<HookCtx*>(p); c->fn(c->u, c->why); }, &c);
 }
@@ -103,11 +122,11 @@ void Updater::leaveUpdating(const char* why) {
 // A fresh association works where a used one stops answering (bench finding, cause unknown): drop and rejoin, then wait.
 bool Updater::rejoin(uint32_t waitMs) {
   LOG_W(TAG, "rejoining the home Wi-Fi (RSSI %d)", (int)WiFi.RSSI());
-  WiFi.disconnect(false, 200);
+  WiFi.disconnect(false, false, 200);                          // (wifioff, eraseap, timeout): the old 2-argument call set eraseap, and reconnect() then had no network (every rejoin failed, bench 2026-09-16)
   delay(300);
   WiFi.reconnect();
   uint32_t t0 = millis();
-  while (!staConnected() && millis() - t0 < waitMs) delay(100);
+  while (!staConnected() && millis() - t0 < waitMs && busy()) delay(100);   // a cancel from the page ends the wait
   if (staConnected()) LOG_I(TAG, "rejoined in %lu ms, RSSI %d", (unsigned long)(millis() - t0), (int)WiFi.RSSI());
   else LOG_W(TAG, "rejoin: not back after %lu ms", (unsigned long)waitMs);
   return staConnected();
@@ -119,15 +138,16 @@ bool Updater::join(const char* ssid, const char* password, char* err, size_t n) 
   if (!*ssid) { snprintf(err, n, "no home Wi-Fi network is set"); return false; }
   if (busy() && job_ != Job::Connecting) { snprintf(err, n, "an update job is running"); return false; }
   WiFi.mode(portal_->running() ? WIFI_AP_STA : WIFI_STA);   // the AP stays for the phone; it follows the station's channel
-  if (joinStartedAt_ && WiFi.status() != WL_CONNECTED) { WiFi.disconnect(false, 300); delay(100); }   // a stuck earlier attempt refuses a new config ("sta is connecting")
+  if (joinStartedAt_ && WiFi.status() != WL_CONNECTED) { WiFi.disconnect(false, false, 300); delay(100); }   // a stuck earlier attempt refuses a new config ("sta is connecting")
   WiFi.setAutoReconnect(true);
   WiFi.setSleep(false);                                        // modem sleep beside BLE and the AP misses beacons (reason 200 at CP-11)
   WiFi.begin(ssid, password && *password ? password : nullptr);
   esp_wifi_set_inactive_time(WIFI_IF_STA, 20);                 // beacon timeout 20 s instead of 6
   joinStartedAt_ = millis() ? millis() : 1;
-  job_ = Job::Connecting; err_[0] = 0; pct_ = 0;
+  job_ = Job::Connecting; err_[0] = 0; pct_ = 0; cancel_ = false;
   setText("joining %s", ssid);
   LOG_I(TAG, "joining \"%s\"%s", ssid, portal_->running() ? " (AP+STA)" : "");
+  ensureTask();
   return true;
 }
 bool Updater::ensureConnected(char* err, size_t n) {
@@ -161,10 +181,20 @@ static void pinDns() {
   LOG_I(TAG, "dns: servers were [%s], now [%s 8.8.8.8]", before, ipaddr_ntoa(&d0));
 }
 // WiFi.hostByName() returns 1 on success and the LwIP error code (also non-zero) on failure: compare with 1.
+// A phone that is the hotspot and also on the board's own network forwards DNS to the board's catch-all name server,
+// which answers every name with 192.168.4.1 (bench, 2026-09-16). Such an answer is rejected and the lookup goes to
+// public resolvers instead.
 static bool resolve(const char* host, IPAddress& ip) {
+  if (WiFi.status() != WL_CONNECTED) { LOG_W(TAG, "dns: no station, %s not looked up", host); return false; }
   for (int attempt = 0; attempt < 3; attempt++) {
     ip = IPAddress();
     int r = WiFi.hostByName(host, ip);
+    if (r == 1 && ip == WiFi.softAPIP()) {
+      LOG_W(TAG, "dns: %s came back as this board's own address (the hotspot forwards to our catch-all); using public resolvers", host);
+      ip_addr_t d0, d1; ipaddr_aton("8.8.8.8", &d0); ipaddr_aton("1.1.1.1", &d1); dns_setserver(0, &d0); dns_setserver(1, &d1);
+      dns_clear_cache();
+      continue;
+    }
     if (r == 1 && ip && ip != IPAddress(255, 255, 255, 255)) return true;
     LOG_W(TAG, "dns: %s lookup %d failed (%d) | RSSI %d", host, attempt + 1, r, (int)WiFi.RSSI());
     delay(500);
@@ -213,9 +243,11 @@ bool Updater::httpOpen(Http& h, const char* url, char* err, size_t n, int64_t fr
     s_location[0] = 0;
     esp_err_t e = ESP_FAIL;
     for (int attempt = 0; attempt < 3 && e != ESP_OK; attempt++) {     // a weak link loses SYNs: three tries of 20 s
+      if (cancel_) { snprintf(err, n, "cancelled"); httpClose(h); return false; }
       e = esp_http_client_open(h.h, 0);
       if (e != ESP_OK) LOG_W(TAG, "http: connect attempt %d to %s (%s) failed (%s) | RSSI %d", attempt + 1, host, ip.toString().c_str(), esp_err_to_name(e), (int)WiFi.RSSI());
     }
+    if (cancel_) { snprintf(err, n, "cancelled"); httpClose(h); return false; }
     if (e != ESP_OK) { snprintf(err, n, "connect failed (%s); no internet on that Wi-Fi, or a weak signal (RSSI %d)?", esp_err_to_name(e), (int)WiFi.RSSI()); httpClose(h); return false; }
     h.length = esp_http_client_fetch_headers(h.h);
     h.status = esp_http_client_get_status_code(h.h);
@@ -280,9 +312,11 @@ bool Updater::fetchManifest(const char* version, char* err, size_t n) {
 bool Updater::check(const char* version, char* err, size_t n) {
   if (busy() && job_ != Job::Connecting) { snprintf(err, n, "a job is running (%s)", jobName()); return false; }
   sb::copyStr(wantVersion_, sizeof wantVersion_, version ? version : "");
-  installAfterCheck_ = false; checkPending_ = true; err_[0] = 0; pct_ = 0;
+  if (staConnected() && linkTooWeak(err, n)) return false;
+  installAfterCheck_ = false; checkPending_ = true; err_[0] = 0; pct_ = 0; cancel_ = false;
   if (!ensureConnected(err, n)) return false;
   if (job_ != Job::Connecting) { job_ = Job::Checking; setText("checking for updates"); }
+  ensureTask();
   return true;
 }
 
@@ -290,9 +324,11 @@ bool Updater::install(const char* version, char* err, size_t n) {
   if (busy() && job_ != Job::Connecting) { snprintf(err, n, "a job is running (%s)", jobName()); return false; }
   if (!Board::usbPresent()) { snprintf(err, n, "plug in USB power first"); return false; }
   sb::copyStr(wantVersion_, sizeof wantVersion_, version ? version : "");
-  installAfterCheck_ = true; checkPending_ = true; err_[0] = 0; pct_ = 0;
+  if (staConnected() && linkTooWeak(err, n)) return false;
+  installAfterCheck_ = true; checkPending_ = true; err_[0] = 0; pct_ = 0; cancel_ = false;
   if (!ensureConnected(err, n)) return false;
   if (job_ != Job::Connecting) { job_ = Job::Checking; setText("checking %s", wantVersion_[0] ? wantVersion_ : "the latest release"); }
+  ensureTask();
   return true;
 }
 
@@ -378,16 +414,16 @@ bool Updater::rollback(char* err, size_t n) {
   job_ = Job::Rebooting; pct_ = 100; setText("restarting with %s", v);
   rebootAt_ = millis() + 1500; if (!rebootAt_) rebootAt_ = 1;
   LOG_W(TAG, "going back to %s (the other slot): restarting", v);
+  ensureTask();
   return true;
 }
 
 bool Updater::cancel(char* err, size_t n) {
   if (job_ == Job::Rebooting || job_ == Job::Writing) { snprintf(err, n, "too late: the image is written"); return false; }
   if (!busy()) { snprintf(err, n, "nothing to cancel"); return false; }
-  if (http_) { Http h; h.h = (esp_http_client_handle_t)http_; httpClose(h); http_ = nullptr; }
-  if (Update.isRunning()) Update.abort();
-  if (job_ == Job::Connecting) WiFi.disconnect(false);
+  cancel_ = true;                                              // the `ota` task closes its connection and aborts the write itself (afterJob)
   job_ = Job::Idle; pct_ = 0; checkPending_ = installAfterCheck_ = false; setText("cancelled");
+  stopStationIfDown();
   Preferences p; if (p.begin("sb-state", false)) { p.remove("resumeSetup"); p.end(); }
   leaveUpdating("cancelled from the page");
   LOG_I(TAG, "cancelled");
@@ -395,16 +431,17 @@ bool Updater::cancel(char* err, size_t n) {
 }
 
 // A `.bin` from the page (§16 ".bin upload"): the same Update path; the embedded version is read back afterwards.
-bool Updater::uploadStart(size_t declaredSize, char* err, size_t n) {
+bool Updater::uploadStart(size_t declaredSize, bool exact, char* err, size_t n) {
   if (busy()) { snprintf(err, n, "a job is running (%s)", jobName()); return false; }
   if (!Board::usbPresent()) { snprintf(err, n, "plug in USB power first"); return false; }
   if (declaredSize > APP_SLOT) { snprintf(err, n, "the file is bigger than the app slot"); return false; }
   enterUpdating("a file from the page");
   Preferences p; if (p.begin("sb-state", false)) { p.putUChar("resumeSetup", 1); p.end(); }
   if (!Update.begin(declaredSize ? declaredSize : UPDATE_SIZE_UNKNOWN, U_FLASH)) { snprintf(err, n, "no room: %s", Update.errorString()); leaveUpdating(err); return false; }
-  upload_ = true; upBytes_ = 0; job_ = Job::Writing; pct_ = 0; err_[0] = 0; total_ = declaredSize;
+  upload_ = true; upExact_ = exact; upBytes_ = 0; job_ = Job::Writing; pct_ = 0; err_[0] = 0; total_ = declaredSize; cancel_ = false;
   setText("receiving a file");
-  LOG_I(TAG, "upload: started (%lu bytes declared)", (unsigned long)declaredSize);
+  LOG_I(TAG, "upload: started (%lu bytes %s)", (unsigned long)declaredSize, exact ? "file size from the page" : "from Content-Length");
+  ensureTask();                                                // the restart timer runs there
   return true;
 }
 bool Updater::uploadWrite(const uint8_t* data, size_t len) {
@@ -418,7 +455,8 @@ bool Updater::uploadWrite(const uint8_t* data, size_t len) {
 bool Updater::uploadEnd(char* err, size_t n) {
   if (!upload_) { snprintf(err, n, "%s", err_[0] ? err_ : "no upload"); return false; }
   upload_ = false;
-  if (!Update.end(true)) { fail("image rejected: %s", Update.errorString()); snprintf(err, n, "%s", err_); return false; }
+  if (upExact_ && total_ && upBytes_ != (size_t)total_) { Update.abort(); fail("received %lu of %lu bytes", (unsigned long)upBytes_, (unsigned long)total_); snprintf(err, n, "%s", err_); return false; }
+  if (!Update.end(!upExact_)) { fail("image rejected: %s", Update.errorString()); snprintf(err, n, "%s", err_); return false; }
   const esp_partition_t* next = esp_ota_get_next_update_partition(nullptr);   // after end() the boot record points at it; describe what was written
   esp_app_desc_t desc;
   const esp_partition_t* boot = esp_ota_get_boot_partition();
@@ -432,18 +470,27 @@ bool Updater::uploadEnd(char* err, size_t n) {
 void Updater::uploadAbort(const char* why) { if (upload_) { upload_ = false; fail("upload stopped: %s", why); } }
 
 // ---------------------------------------------------------------------------
-// SETUP off (console bench, or a job outliving the portal): the blocking steps (connects of up to 20 s) cannot run on
-// the app task (task watchdog), so they get a task of their own that lives while the job does.
+// Every job runs on its own task: the blocking steps (connects of up to 20 s) cannot run on the app task (task
+// watchdog) and must not run on the net task either, or the page stalls and a cancel never arrives (bench
+// 2026-09-16). The task lives while the job does and cleans up after a cancel.
 void Updater::taskThunk(void* p) {
   Updater* u = static_cast<Updater*>(p);
   while (u->busy() || u->rebootAt_) { u->tick(true); vTaskDelay(pdMS_TO_TICKS(5)); }
+  u->afterJob();
   u->task_ = nullptr;
   vTaskDelete(nullptr);
 }
-void Updater::tickApp() {
+void Updater::afterJob() {
+  if (http_) { Http h; h.h = (esp_http_client_handle_t)http_; httpClose(h); http_ = nullptr; }
+  if (cancel_ && Update.isRunning() && !upload_) Update.abort();
+  if (cancel_) LOG_I(TAG, "job task done after a cancel");
+  cancel_ = false;
+}
+void Updater::ensureTask() {
   if (task_ || (!busy() && !rebootAt_)) return;
   if (xTaskCreatePinnedToCore(&Updater::taskThunk, "ota", 12 * 1024, this, 1, (TaskHandle_t*)&task_, 0) != pdPASS) { task_ = nullptr; fail("no task for the update"); }
 }
+void Updater::tickApp() { ensureTask(); }
 
 void Updater::tick(bool onNetTask) {
   onNet_ = onNetTask;
@@ -453,7 +500,9 @@ void Updater::tick(bool onNetTask) {
     case Job::Connecting: {
       if (staConnected()) {
         LOG_I(TAG, "joined \"%s\": %s, RSSI %d | heap free %lu", WiFi.SSID().c_str(), WiFi.localIP().toString().c_str(), (int)WiFi.RSSI(), (unsigned long)ESP.getFreeHeap());
-        if (checkPending_) { job_ = Job::Checking; setText("checking for updates"); }
+        char weak[160];
+        if (checkPending_ && linkTooWeak(weak, sizeof weak)) { checkPending_ = installAfterCheck_ = false; fail("%s", weak); }
+        else if (checkPending_) { job_ = Job::Checking; setText("checking for updates"); }
         else { job_ = Job::Done; setText("joined %s", WiFi.SSID().c_str()); }
       } else if (due(now, joinStartedAt_ + JOIN_TIMEOUT_MS)) {
         wl_status_t st = WiFi.status();
@@ -468,9 +517,14 @@ void Updater::tick(bool onNetTask) {
       checkPending_ = false;
       bool ok = false;
       for (int attempt = 0; attempt < 3 && !ok; attempt++) {           // the whole fetch again: a weak link loses a hop now and then
+        if (job_ != Job::Checking) return;                                // cancelled from the page meanwhile
         ok = fetchManifest(wantVersion_, err, sizeof err);
-        if (!ok) { LOG_W(TAG, "check %d of 3: %s", attempt + 1, err); if (attempt < 2) rejoin(30000); }
+        if (!ok) {
+          LOG_W(TAG, "check %d of 3: %s", attempt + 1, err);
+          if (attempt < 2 && !rejoin(30000)) { if (job_ == Job::Checking) snprintf(err, sizeof err, "the home Wi-Fi dropped and did not come back (weak signal?)"); break; }
+        }
       }
+      if (job_ != Job::Checking) return;
       if (!ok) { fail("%s", err); break; }
       if (!installAfterCheck_) { job_ = Job::Done; setText("%s is available", man_.version); break; }
       installAfterCheck_ = false;

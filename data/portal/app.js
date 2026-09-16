@@ -9,7 +9,7 @@ const S = {
   schema: null, cfg: null, draft: null, sounds: [], status: null, diag: null,
   // The sign-in sheet cannot pick files (§15.3). Older iOS sheets say CaptiveNetworkSupport; newer ones are a bare
   // WebKit view with no Safari token, which real Safari always carries. Android's sheet is a WebView.
-  captive: /CaptiveNetworkSupport|Android.*WebView|; wv\)/i.test(navigator.userAgent) || (/iPhone|iPad|iPod/.test(navigator.userAgent) && !/Safari\//.test(navigator.userAgent)),
+  captive: /CaptiveNetworkSupport|Android.*WebView|; wv\)/i.test(navigator.userAgent) || (/iPhone|iPad|iPod|Macintosh/.test(navigator.userAgent) && /AppleWebKit/.test(navigator.userAgent) && !/Safari\//.test(navigator.userAgent)),
   previewed: {}, identify: null, upload: null, diagTimer: null, statusTimer: null
 };
 const STRUCT = ['levels', 'audio.cues', 'device.ownerLabel', 'levelChange.vibration.pattern', 'hardware.padChannels', 'pads.roles', 'touch.padPressPct'];
@@ -143,12 +143,12 @@ function showWarnings(list) {
 function renderLanding() {
   const main = $('main'); main.innerHTML = '';
   $('#nav').hidden = true;
-  const ua = navigator.userAgent, ios = /iPhone|iPad|iPod/.test(ua);
+  const ua = navigator.userAgent, ios = /iPhone|iPad|iPod/.test(ua), mac = /Macintosh/.test(ua);
   main.appendChild(el('section', {}, [
     el('h2', { text: 'SoundBoard setup' }),
-    el('p', { html: 'You are connected to the board. This is the phone\'s sign-in sheet, which cannot show the whole settings page.' }),
+    el('p', { html: mac ? 'You are connected to the board. This is the Mac\'s network sign-in window, not the settings page.' : 'You are connected to the board. This is the phone\'s sign-in sheet, which cannot show the whole settings page.' }),
     el('ol', { class: 'steps' }, [
-      el('li', { html: ios ? 'Tap <b>Done</b> at the top, then choose <b>Use Without Internet</b>.' : 'Choose <b>Use this network as is</b> (or tap Done / Continue).' }),
+      el('li', { html: ios ? 'Tap <b>Done</b> at the top, then choose <b>Use Without Internet</b>.' : mac ? 'Click <b>Cancel</b> at the bottom of this window. The Mac stays on the board\'s network.' : 'Choose <b>Use this network as is</b> (or tap Done / Continue).' }),
       el('li', { html: 'Open your browser and go to <b>http://192.168.4.1</b>' })
     ]),
     el('p', { class: 'muted', html: 'The board shows the same address on its screen. Setup turns itself off after ' + '10 minutes without a change.' }),
@@ -278,8 +278,9 @@ function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '
 const FW_BUSY = ['connecting', 'checking', 'downloading', 'verifying', 'writing', 'rebooting'];
 async function loadFirmware() {
   let f;
-  try { f = await api('/api/firmware/status'); } catch (e) { $('#fwStatus').textContent = e.message; return; }
+  try { f = await api('/api/firmware/status'); } catch (e) { $('#fwStatus').textContent = e.message; clearTimeout(S.fwTimer); if (S.fw && FW_BUSY.includes(S.fw.job)) S.fwTimer = setTimeout(loadFirmware, 2000); return; }   // a lost poll must not leave the card stale
   S.fw = f;
+  try { const exp = sessionStorage.getItem('sbExpect'); if (exp) { sessionStorage.removeItem('sbExpect'); if (f.version === exp) toast('Now running ' + exp); else toast('Expected ' + exp + ' but the board runs ' + f.version + (f.other && f.other.present ? ' (it went back to the previous version)' : ''), 'err'); } } catch (e) { }
   $('#fwStatus').innerHTML = 'Running <b>' + esc(f.version) + '</b> from slot ' + esc(f.slot) + ' (' + esc(f.state) + ').' +
     (f.other && f.other.present ? ' The other slot holds <b>' + esc(f.other.version || '?') + '</b> (' + esc(f.other.state) + ').' : '') +
     ' Releases from <b>' + esc(f.repo) + '</b>, ' + esc(f.channel) + '.';
@@ -345,11 +346,20 @@ function bindFirmware() {
     const f = $('#fwFile').files[0]; if (!f) { toast('Choose a .bin first'); return; }
     if (!confirm('Install ' + f.name + ' (' + kb(f.size) + ')? The board restarts when it is written.')) return;
     const fd = new FormData(); fd.append('file', f, f.name);
-    const xhr = new XMLHttpRequest(); xhr.open('POST', '/api/firmware/upload');
-    $('#fwBarBox').hidden = false; $('#fwJob').textContent = 'sending ' + f.name + ' …';
-    xhr.upload.onprogress = e => { if (e.lengthComputable) $('#fwBar').style.width = Math.round(e.loaded * 100 / e.total) + '%'; };
-    xhr.onload = () => { let r = null; try { r = JSON.parse(xhr.responseText); } catch (e) { } if (xhr.status === 200) loadFirmware(); else { toast('Not installed: ' + ((r && r.error) || ('HTTP ' + xhr.status)), 'err'); loadFirmware(); } };
-    xhr.onerror = () => { toast('Upload failed (connection lost?)', 'err'); loadFirmware(); };
+    const xhr = new XMLHttpRequest(); xhr.open('POST', '/api/firmware/upload?size=' + f.size);
+    clearTimeout(S.fwTimer);                                   // the board is busy receiving: progress comes from the browser, not from status polls
+    $('#fwBarBox').hidden = false; $('#fwBar').style.width = '0%'; $('#fwJob').innerHTML = '<b>Sending</b> ' + esc(f.name) + ' … 0 %';
+    ['btnFwUpload', 'btnFwInstall', 'btnFwInstallVer', 'btnFwRollback', 'btnFwCheck'].forEach(id => { $('#' + id).disabled = true; });
+    xhr.upload.onprogress = e => { if (e.lengthComputable) { const p = Math.round(e.loaded * 100 / e.total); $('#fwBar').style.width = p + '%'; $('#fwJob').innerHTML = '<b>Sending</b> ' + esc(f.name) + ' … ' + p + ' %'; } };
+    xhr.upload.onload = () => { $('#fwJob').innerHTML = '<b>Sent.</b> The board is checking the file …'; };
+    xhr.onload = () => {
+      let r = null; try { r = JSON.parse(xhr.responseText); } catch (e) { }
+      if (xhr.status === 200 && r && r.job === 'rebooting') {
+        try { if (r.version) sessionStorage.setItem('sbExpect', r.version); } catch (e) { }
+        waitForReboot('Installed ' + (r.version || '') + '. Restarting');
+      } else { toast('Not installed: ' + ((r && r.error) || ('HTTP ' + xhr.status)), 'err'); loadFirmware(); }
+    };
+    xhr.onerror = () => { toast('Upload failed: the connection to the board was lost', 'err'); loadFirmware(); };
     xhr.send(fd);
   };
 }
