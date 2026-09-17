@@ -106,6 +106,11 @@ const SettingDesc SETTINGS[] = {
   { "update.repo",                     SType::String,  FIELD(update.repo),             0,     64,     1,    "alex-nugent/SoundBoard", nullptr,                      nullptr,                     "Update repository",               "Firmware",    PA,              0 },   // the public releases repository (OPEN-14 closed 2026-09-14)
   { "update.channel",                  SType::String,  FIELD(update.channel),          1,     24,     1,    "latest",        nullptr,                                nullptr,                     "Update channel",                  "Firmware",    PA,              0 },
 
+  { "pmode.k",                         SType::F32,     FIELD(pmode.k),                 0.001f,0.5f,   0.001f,"0.01",         nullptr,                                nullptr,                     "Averaging constant k",            "P mode",      PL,              0 },
+  { "pmode.sampleHz",                  SType::U16,     FIELD(pmode.sampleHz),          10,    5000,   10,   "1000",          nullptr,                                nullptr,                     "Bit sample rate (Hz)",            "P mode",      PL,              0 },
+  { "pmode.sigma",                     SType::F32,     FIELD(pmode.sigma),             1.0f,  10.0f,  0.1f, "4.5",           nullptr,                                nullptr,                     "Trigger threshold (sigma)",       "P mode",      PL,              0 },
+  { "pmode.test",                      SType::Enum,    FIELD(pmode.test),              0,     1,      1,    "two-sided",     "two-sided|one-sided",                  nullptr,                     "Threshold test",                  "P mode",      PL,              0 },
+
   { "diag.logToCard",                  SType::Bool,    FIELD(diag.logToCard),          0,     1,      1,    "false",         nullptr,                                nullptr,                     "Log to the card",                 "Diagnostics", PLA,             0 },
   { "diag.logLevel",                   SType::Enum,    FIELD(diag.logLevel),           0,     3,      1,    "info",          "error|warn|info|debug",                nullptr,                     "Log level",                       "Diagnostics", PLA,             0 },
 };

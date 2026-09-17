@@ -15,7 +15,7 @@ const S = {
 const STRUCT = ['levels', 'audio.cues', 'device.ownerLabel', 'levelChange.vibration.pattern', 'hardware.padChannels', 'pads.roles', 'touch.padPressPct'];
 const ENTRY_DEF = { sound: '', label: '', type: '', key: '', keyMode: 'type', action: 'none', goToLevel: 1, volumePct: 100, vibrate: null, jack: null };
 const SECTIONS = [['status', 'Status'], ['levels', 'Levels'], ['buttons', 'Buttons'], ['sounds', 'Sounds'], ['audio', 'Audio'], ['btspk', 'BT speaker'],
-  ['keyboard', 'Keyboard'], ['vibration', 'Vibration'], ['jacks', 'Jacks'], ['display', 'Display'], ['power', 'Power'], ['device', 'Device'],
+  ['keyboard', 'Keyboard'], ['pmode', 'P mode'], ['vibration', 'Vibration'], ['jacks', 'Jacks'], ['display', 'Display'], ['power', 'Power'], ['device', 'Device'],
   ['backup', 'Backup'], ['firmware', 'Firmware'], ['diag', 'Diagnostics']];
 
 // ---------------------------------------------------------------------------
@@ -251,6 +251,7 @@ function renderStatus() {
   tile('BT speaker', !st.bt.enabled ? 'off' : st.bt.linked ? 'linked' + (st.bt.peer ? ' to ' + st.bt.peer : '') : st.bt.pairing === 'searching' || st.bt.pairing === 'wiping' ? 'pairing, ' + st.bt.pairLeftS + ' s' : 'no speaker');
   tile('Keyboard', !st.keyboard.enabled ? 'off' : st.keyboard.paused ? 'paused for setup' : st.keyboard.link === 'ready' ? 'tablet connected' : st.keyboard.link);
   tile('Speakers', st.speakers ? 'on' : 'off');
+  if (st.pmode) tile('P mode', st.pmode.on ? 'on, ' + st.pmode.triggers + ' press' + (st.pmode.triggers === 1 ? '' : 'es') : 'off');
   tile('Firmware', st.version);
   tile('Up for', secs(st.uptimeS) + ', ' + st.reset);
   tile('Setup', st.setup.clients + ' phone' + (st.setup.clients === 1 ? '' : 's') + ', off after ' + st.setup.idleOffMin + ' min idle (' + secs(st.setup.idleS) + ' now)');
@@ -268,6 +269,8 @@ function renderStatus() {
   $('#btnForgetSpk').disabled = $('#btnPair').disabled;
   $('#kbdStatus').innerHTML = !st.keyboard.enabled ? 'Typing is <b>off</b>.' : st.keyboard.paused ? 'Paused while setup is on (setup.pauseKeyboard).' :
     (st.keyboard.link === 'ready' ? 'A tablet is <b>connected</b>' : 'Advertising as <b>' + esc(st.name) + '</b>, no tablet connected') + '; ' + st.keyboard.bonds + ' host' + (st.keyboard.bonds === 1 ? '' : 's') + ' remembered.';
+  if (st.pmode) $('#pmStatus').innerHTML = !st.pmode.on ? 'P mode is <b>off</b>' + (st.pmode.radio ? '' : ' and cannot start: the Bluetooth radio is off') + '. Switch it on from the board\'s menu.' :
+    '<b>On</b>: ' + st.pmode.words + ' bits per pad so far, ' + st.pmode.triggers + ' press' + (st.pmode.triggers === 1 ? '' : 'es') + '; sigma ' + Number(st.pmode.sigmaValue).toFixed(4) + ', threshold ' + Number(st.pmode.threshold).toFixed(4) + ' from 0.5.';
   if (st.bt.pairing === 'searching' || st.bt.pairing === 'wiping') { clearInterval(S.statusTimer); S.statusTimer = setInterval(loadStatus, 2000); }
   else if (S.statusTimer && S.statusFast) { clearInterval(S.statusTimer); S.statusTimer = setInterval(loadStatus, 5000); }
   S.statusFast = st.bt.pairing === 'searching' || st.bt.pairing === 'wiping';

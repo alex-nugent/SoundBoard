@@ -18,11 +18,11 @@ static void goToPath(const char* path) { for (uint8_t i = 0; i < m.count(); i++)
 static void apply(const char* text) { TEST_ASSERT_TRUE(config::setScalarText(cfg, *m.item().desc, text, nullptr)); }
 
 void test_items_in_the_order_of_14_3() {                    // minus Volume, dropped at CP-9 (the buttons set it)
-  TEST_ASSERT_EQUAL(10, m.count());
-  const char* paths[10] = { "audio.outputs.speakers", "bluetoothSpeaker.enabled", nullptr, "keyboard.enabled", "vibration.enabled", "display.brightnessPct", nullptr, nullptr, nullptr, nullptr };
-  MenuKind kinds[10] = { MenuKind::Setting, MenuKind::Setting, MenuKind::PairSpeaker, MenuKind::Setting, MenuKind::Setting, MenuKind::Setting, MenuKind::Recalibrate, MenuKind::WifiSetup, MenuKind::Exit, MenuKind::Cancel };
-  uint8_t orders[10] = { 1, 3, 4, 5, 6, 7, 8, 9, 10, 11 };
-  for (uint8_t i = 0; i < 10; i++) {
+  TEST_ASSERT_EQUAL(11, m.count());
+  const char* paths[11] = { "audio.outputs.speakers", "bluetoothSpeaker.enabled", nullptr, "keyboard.enabled", "vibration.enabled", "display.brightnessPct", nullptr, nullptr, nullptr, nullptr, nullptr };
+  MenuKind kinds[11] = { MenuKind::Setting, MenuKind::Setting, MenuKind::PairSpeaker, MenuKind::Setting, MenuKind::Setting, MenuKind::Setting, MenuKind::PMode, MenuKind::Recalibrate, MenuKind::WifiSetup, MenuKind::Exit, MenuKind::Cancel };
+  uint8_t orders[11] = { 1, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12 };
+  for (uint8_t i = 0; i < 11; i++) {
     TEST_ASSERT_EQUAL((int)kinds[i], (int)m.at(i).kind);
     TEST_ASSERT_EQUAL(orders[i], m.at(i).order);
     if (paths[i]) TEST_ASSERT_EQUAL_STRING(paths[i], m.at(i).desc->path);
@@ -32,10 +32,10 @@ void test_items_in_the_order_of_14_3() {                    // minus Volume, dro
 void test_next_and_prev_wrap() {
   TEST_ASSERT_EQUAL(0, m.index());
   m.prev();
-  TEST_ASSERT_EQUAL(9, m.index());
+  TEST_ASSERT_EQUAL(10, m.index());
   m.next();
   TEST_ASSERT_EQUAL(0, m.index());
-  for (int i = 0; i < 10; i++) m.next();
+  for (int i = 0; i < 11; i++) m.next();
   TEST_ASSERT_EQUAL(0, m.index());
 }
 
@@ -158,6 +158,19 @@ void test_action_items_and_confirmation() {
   TEST_ASSERT_FALSE(m.armed());
 }
 
+void test_p_mode_item_is_a_value_that_is_never_a_setting() {   // §4.5: runtime only, so Cancel and Save leave it alone
+  goTo(MenuKind::PMode);
+  TEST_ASSERT_FALSE(m.isAction());
+  TEST_ASSERT_EQUAL_STRING("", m.actionVerb());
+  char s[MENU_TEXT];
+  m.label(s, sizeof s);  TEST_ASSERT_EQUAL_STRING("P mode", s);
+  m.valueText(cfg, 60, s, sizeof s); TEST_ASSERT_EQUAL_STRING("OFF", s);
+  m.setPModeOn(true);
+  m.valueText(cfg, 60, s, sizeof s); TEST_ASSERT_EQUAL_STRING("ON", s);
+  TEST_ASSERT_FALSE(m.changed(cfg));                       // not part of the snapshot
+  TEST_ASSERT_FALSE(m.stepText(cfg, +1, s, sizeof s));     // the app steps it, not the table
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_items_in_the_order_of_14_3);
@@ -169,5 +182,6 @@ int main(int, char**) {
   RUN_TEST(test_volume_steps_by_step_pct_and_clamps);
   RUN_TEST(test_changed_and_snapshot);
   RUN_TEST(test_action_items_and_confirmation);
+  RUN_TEST(test_p_mode_item_is_a_value_that_is_never_a_setting);
   return UNITY_END();
 }

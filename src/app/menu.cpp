@@ -24,6 +24,7 @@ void AppState::openMenu(const char* why) {
   hold_ = sb::HoldProgress(); view_.holdKind = 0; view_.holdPct = 0; view_.holdOffReached = false;
   menu_.first();
   menu_.setSetupOn(setupOn_);
+  menu_.setPModeOn(pmode_.on());
   menu_.open(cfg_, volume_.master());                          // the snapshot Cancel restores
   menuLastKeyAt_ = now; menuResultUntil_ = 0; menuPairTickAt_ = 0; menuCalibrating_ = false;
   menuView_ = MenuView();
@@ -75,6 +76,9 @@ void AppState::refreshMenuItem() {
   if (menu_.item().kind == sb::MenuKind::Volume) {
     menuView_.canUp = sb::MenuModel::stepVolume(volume_.master(), volume_.stepPct(), +1, v);
     menuView_.canDown = sb::MenuModel::stepVolume(volume_.master(), volume_.stepPct(), -1, v);
+  } else if (menu_.item().kind == sb::MenuKind::PMode) {       // §4.5: up = ON, down = OFF, like a switch
+    menuView_.canUp = !pmode_.on();
+    menuView_.canDown = pmode_.on();
   } else {
     menuView_.canUp = menu_.stepText(cfg_, +1, t, sizeof t);
     menuView_.canDown = menu_.stepText(cfg_, -1, t, sizeof t);
@@ -106,6 +110,9 @@ void AppState::menuStep(int dir, uint32_t now) {
     uint8_t v;
     if (!sb::MenuModel::stepVolume(volume_.master(), volume_.stepPct(), dir, v)) return;
     setVolumeLive(v, now);
+  } else if (it.kind == sb::MenuKind::PMode) {                 // §4.5: runtime only; refused while the radio is off
+    if ((dir > 0) == pmode_.on()) return;
+    if (!setPMode(dir > 0, "menu item")) menuResult("BLUETOOTH IS OFF", 3000, now);
   } else if (it.kind == sb::MenuKind::Setting) {
     char t[sb::MENU_TEXT];
     if (!menu_.stepText(cfg_, dir, t, sizeof t)) { LOG_D(TAG, "%s: at the end of its range", it.desc->path); return; }

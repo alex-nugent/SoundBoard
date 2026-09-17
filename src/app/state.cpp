@@ -105,6 +105,7 @@ void AppState::begin(const BootInfo& bi) {
     setFault(F_SAFE, true);
   }
   configLoaded_ = true;
+  pmode_.configure(cfg_); pmodeSigma_ = cfg_.pmode.sigma;    // §4.5: the model knows its threshold before the first switch-on
   setFault(F_CARD, !store_.cardMounted());
   setFault(F_CONFIG, store_.cardConfigBad());
   Log::setLevel((LogLevel)cfg_.diag.logLevel);
@@ -227,6 +228,7 @@ void AppState::refreshView(uint8_t regions) {
   view_.lowBattery = battery_.valid() && battery_.percent() < cfg_.power.lowBatteryWarnPct;
   view_.volumePct = volume_.master();
   view_.muted = volume_.muted();
+  view_.pmode = pmode_.on();
   updateStateWord(millis());                                   // §11.4 bottom line
   view_.faults = faults_;
   display_.dirty(regions);
@@ -280,6 +282,10 @@ void AppState::onConfigChanged() {
   levels_.configure(levelPolicy(), cfg_.levels.count);        // §5.3: clamp after a level edit
   haptics_.configure(cfg_); jacks_.configure(cfg_);
   kbd_.configure(cfg_);                                        // §8.4: the enable toggle acts at once
+  if (cfg_.pmode.k != pmode_.model().k() || cfg_.pmode.sampleHz != pmode_.sampleHz() || cfg_.pmode.sigma != pmodeSigma_ || (cfg_.pmode.test == sb::PMODE_TWO_SIDED) != pmode_.model().twoSided()) {
+    pmodeSigma_ = cfg_.pmode.sigma;
+    pmode_.configure(cfg_);                                    // §4.5: live; the averages restart at 0.5
+  }
   level_ = levels_.current();
   press_.cancel();                                             // §5.2: a change to the levels ends a repeat
   jacks_.allOff();
@@ -400,6 +406,15 @@ void AppState::handleEvent(const Event& e, uint32_t now) {
     case Ev::RailDown:
       railReady_ = false;
       break;
+    case Ev::PModeTrigger: {                                       // §4.5: a full press of that pad, as the console's `1`-`4`
+      uint8_t pos = e.pad.pos;
+      if (!pmode_.on() || pos > 3) break;
+      pmode_.noteTrigger(now);
+      if (mode_ != AppMode::Active && mode_ != AppMode::Dimmed) { LOG_I(TAG, "P mode: P%u triggered, dropped (%s)", pos + 1, modeName()); break; }
+      if (!injectPress(pos, 100, now)) { LOG_I(TAG, "P mode: P%u triggered, dropped (a press is in progress)", pos + 1); break; }
+      LOG_I(TAG, "P mode: P%u triggered after %lu words (trigger %lu)", pos + 1, (unsigned long)pmode_.model().samples(), (unsigned long)pmode_.triggers());
+      break;
+    }
     case Ev::ConfigChanged:
     default:
       break;
@@ -791,16 +806,55 @@ void AppState::tickOverlays(uint32_t now) {
   }
 }
 
-void AppState::simulatePress(uint8_t pos, uint32_t ms) {
-  if (pos > 3) return;
-  if (simPos_ >= 0 || touch_.anyPressed()) { Serial.println("a press is already in progress"); return; }
-  uint32_t now = millis();
+bool AppState::injectPress(uint8_t pos, uint32_t ms, uint32_t now) {
+  if (pos > 3) return false;
+  if (simPos_ >= 0 || touch_.anyPressed()) return false;
   if (ms < 20) ms = 100; if (ms > 60000) ms = 60000;
   simPos_ = (int8_t)pos; simPressId_ = touch_.nextPressId(); simUntil_ = now + ms; simStart_ = now;
   Event e = { Ev::PadDown, now, {} };
   e.pad.pos = pos; e.pad.ch = cfg_.hardware.padChannels[pos]; e.pad.delta = 50; e.pad.pressId = simPressId_; e.pad.heldMs = 0;
   EventBus::post(e);
-  Serial.printf("simulated press P%u for %lu ms\n", pos + 1, (unsigned long)ms);
+  return true;
+}
+
+void AppState::simulatePress(uint8_t pos, uint32_t ms) {
+  if (pos > 3) return;
+  if (!injectPress(pos, ms, millis())) { Serial.println("a press is already in progress"); return; }
+  Serial.printf("simulated press P%u for %lu ms\n", pos + 1, (unsigned long)(ms < 20 ? 100 : ms > 60000 ? 60000 : ms));
+}
+
+bool AppState::setPMode(bool on, const char* why) {             // §4.5
+  if (on == pmode_.on()) return true;
+  if (on) {
+    if (!kbd_.initOk()) { LOG_W(TAG, "P mode not started (%s): the BLE stack is down, so the random numbers would not be hardware ones", why); return false; }
+    if (!pmode_.start(cfg_)) return false;
+    LOG_I(TAG, "P mode ON (%s)", why);
+  } else {
+    pmode_.stop();
+    LOG_I(TAG, "P mode OFF (%s)", why);
+  }
+  menu_.setPModeOn(pmode_.on());
+  view_.pmode = pmode_.on();
+  for (uint8_t i = 0; i < 4; i++) view_.pbar[i] = 0;
+  pbarAt_ = 0;
+  display_.dirty(R_TOP | R_MAIN | R_BARS);                     // the level line makes room for the bars, or takes it back
+  return true;
+}
+
+void AppState::tickPModeBars(uint32_t now) {                   // §4.5: the four bars at 10 Hz, pushed only when a bar moved
+  if (!pmode_.on() || !due(now, pbarAt_)) return;
+  pbarAt_ = now + 100;
+  const sb::PModeModel& m = pmode_.model();
+  float th = m.threshold();
+  bool changed = false;
+  for (uint8_t i = 0; i < 4; i++) {
+    float d = m.avg(i) - 0.5f;
+    if (m.twoSided()) d = d < 0 ? -d : d; else if (d < 0) d = 0;
+    float p = th > 0 ? d / th : 0;
+    uint8_t v = p >= 1.0f ? 255 : (uint8_t)(p * 255.0f);
+    if (v != view_.pbar[i]) { view_.pbar[i] = v; changed = true; }
+  }
+  if (changed && (mode_ == AppMode::Active || mode_ == AppMode::Dimmed)) display_.dirty(R_BARS);
 }
 
 void AppState::simulateCommand(sb::ButtonCmd c) {
@@ -1165,6 +1219,7 @@ void AppState::tick() {
       break;
   }
   tickOverlays(now);
+  tickPModeBars(now);                                          // §4.5
   tickSetup(now);                                              // §15: the portal's calls on the app task, its timers and card
   updater_.tickApp();                                          // §16: a running job always has its own task
 
@@ -1247,6 +1302,7 @@ void AppState::printStatus(Print& out) {
                            (unsigned long)((millis() - portal_.lastInputRequestMs()) / 1000), (unsigned)cfg_.setup.idleOffMin, (unsigned long)portal_.netStackMin());
   else out.printf("setup: off | menu item or `w` starts it | password \"%s\" | idle off after %u min%s\n", cfg_.setup.password, (unsigned)cfg_.setup.idleOffMin, cfg_.setup.pauseKeyboard ? " | keyboard paused during setup" : "");
   updater_.printStatus(out);
+  pmode_.printStatus(out);
   out.printf("menu: %s | %u items | hold both %u ms (%s) | timeout %u s%s\n", mode_ == AppMode::Menu ? "OPEN" : "closed", (unsigned)menu_.count(),
              (unsigned)cfg_.menu.holdMs, cfg_.menu.enabled ? "enabled" : "menu.enabled false", (unsigned)cfg_.menu.timeoutS,
              menu_.changed(cfg_) && mode_ == AppMode::Menu ? " | changes pending" : "");

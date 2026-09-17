@@ -158,6 +158,9 @@ void AppState::portalStatus(Print& out) {
   k["bonds"] = kbd_.bonds(); k["initOk"] = kbd_.initOk();
   d["speakers"] = cfg_.audio.outputs.speakers;
   d["playing"] = audio_.playing();
+  JsonObject pm = d["pmode"].to<JsonObject>();                 // §4.5
+  pm["on"] = pmode_.on(); pm["triggers"] = pmode_.triggers(); pm["words"] = pmode_.model().samples();
+  pm["sigmaValue"] = pmode_.model().sigma(); pm["threshold"] = pmode_.model().threshold(); pm["radio"] = kbd_.initOk();
   JsonArray f = d["faults"].to<JsonArray>();
   for (uint8_t i = 0; i < N_FAULTS; i++) if (faults_ & FAULTS[i].bit) { JsonObject o = f.add<JsonObject>(); o["token"] = FAULTS[i].token; o["text"] = FAULTS[i].message; }
   JsonArray w = d["warnings"].to<JsonArray>();

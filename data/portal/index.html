@@ -77,6 +77,13 @@
   <div class="row-btns"><button id="btnForgetHosts" class="ghost">Forget all keyboard hosts</button></div>
 </section>
 
+<section id="pmode" data-group="P mode">
+  <h2>P mode</h2>
+  <p class="help">Switched on from the board's menu (P mode), off again at every power-up; a bold P shows in the top row while it runs. Each pad has a running average of a stream of hardware random bits; when an average strays more than the threshold from one half, that pad is pressed and all four averages restart. The average remembers about 2 / k samples. At k 0.01, 1000 bits/s and 4.5 sigma a chance press comes less than once an hour; 4 sigma gives a few an hour.</p>
+  <div class="rows"></div>
+  <div id="pmStatus" class="statusline"></div>
+</section>
+
 <section id="vibration" data-group="Vibration">
   <h2>Vibration</h2>
   <div class="rows"></div>

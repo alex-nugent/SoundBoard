@@ -37,6 +37,8 @@ struct NormalView {
   bool     lowBattery = false;
   uint8_t  volumePct = 60;
   bool     muted = false;
+  bool     pmode = false;         // §4.5: a bold P between the battery and the volume
+  uint8_t  pbar[4] = { 0, 0, 0, 0 };   // §4.5: each pad's distance from 0.5 as a share of the threshold, 0..255; bars above the labels while pmode
   char     link[24] = "";         // §11.4 bottom line, priority 3: a link change in plain words, for a few seconds
   char     stateWord[24] = "";    // §11.4 bottom line, priority 4: one dim word while something is missing
   uint16_t faults = 0;

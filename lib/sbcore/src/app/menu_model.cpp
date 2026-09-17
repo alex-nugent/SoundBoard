@@ -22,10 +22,11 @@ void MenuModel::build() {                                    // §14.3: the tabl
     if ((SETTINGS[i].flags & MENU) && SETTINGS[i].menuOrder) add(MenuKind::Setting, &SETTINGS[i], SETTINGS[i].menuOrder, SETTINGS[i].label);
   // Volume (§14.3 item 2) was dropped at CP-9: the − / + buttons set it from the normal view, with the popup.
   add(MenuKind::PairSpeaker, nullptr, 4,  "Pair BT speaker");
-  add(MenuKind::Recalibrate, nullptr, 8,  "Recalibrate buttons");
-  add(MenuKind::WifiSetup,   nullptr, 9,  "Wi-Fi setup");
-  add(MenuKind::Exit,        nullptr, 10, "Save and exit");
-  add(MenuKind::Cancel,      nullptr, 11, "Cancel changes");
+  add(MenuKind::PMode,       nullptr, 8,  "P mode");           // §4.5: on / off for this power-up only
+  add(MenuKind::Recalibrate, nullptr, 9,  "Recalibrate buttons");
+  add(MenuKind::WifiSetup,   nullptr, 10, "Wi-Fi setup");
+  add(MenuKind::Exit,        nullptr, 11, "Save and exit");
+  add(MenuKind::Cancel,      nullptr, 12, "Cancel changes");
 }
 
 const char* MenuModel::actionVerb() const {
@@ -160,6 +161,7 @@ void MenuModel::valueText(const Config& c, uint8_t volumePct, char* out, size_t 
   const MenuItem& it = item();
   out[0] = 0;
   if (it.kind == MenuKind::Volume) { snprintf(out, n, "%u", (unsigned)volumePct); return; }
+  if (it.kind == MenuKind::PMode)  { copyStr(out, n, pmodeOn_ ? "ON" : "OFF"); return; }
   if (it.kind != MenuKind::Setting) {                          // an action: the pad to press, by the word shown above it
     if (it.kind == MenuKind::PairSpeaker && pairWipe_) copyStr(out, n, "forget all and pair");
     else snprintf(out, n, "press %s%s", actionVerb(), confirmNeeded() ? " twice" : "");

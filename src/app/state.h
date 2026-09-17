@@ -31,6 +31,7 @@
 #include "app/menu_model.h"
 #include "net/portal.h"
 #include "net/ota.h"
+#include "app/pmode.h"
 
 enum class BootKind : uint8_t { Cold, SleepWake, OffWake };
 
@@ -79,6 +80,7 @@ class AppState : private PressHost {
 
   // Console: `1`-`4 [ms]` (full presses, §5.2/§5.3), `+`/`-`, `++`, `h+`/`h-`, `l`, `c`.
   void simulatePress(uint8_t pos, uint32_t ms);
+  bool injectPress(uint8_t pos, uint32_t ms, uint32_t now);   // a full press of a pad from software (the console, P mode): false while a press is in progress
   void simulateClick(int dir);
   void simulateCommand(sb::ButtonCmd c);
   void setLiveDeltas(bool on) { liveDeltas_ = on; }
@@ -96,6 +98,10 @@ class AppState : private PressHost {
   bool startPairing(bool wipe);            // console `p` / `pairwipe`, later the menu and portal (§7.3): AT+PAIR, 60 s; wipe = AT+DELVMLINK first
   bool toggleKeyboard();                   // console `kbd`: keyboard.enabled in RAM (§8.4)
   BleKeyboard& keyboard() { return kbd_; }
+  // §4.5 P mode: runtime only, never saved. setPMode(true) is false when the radio is off (no BLE stack: safe mode, `bleoff`).
+  bool setPMode(bool on, const char* why);
+  bool pmodeOn() const { return pmode_.on(); }
+  PModeTask& pmode() { return pmode_; }
 
   // §15: SETUP, the Wi-Fi settings portal (app/setup.cpp). An overlay on ACTIVE / DIMMED.
   bool setupOn() const { return setupOn_; }
@@ -252,6 +258,10 @@ class AppState : private PressHost {
   uint16_t         identSeq_ = 0;              // every PadDown: the channel and position, for the page's Identify pads (§15.3)
   uint8_t          identCh_ = 0, identPos_ = 0;
   // §16: updates.
+  PModeTask        pmode_;
+  float            pmodeSigma_ = -1.0f;        // the S last handed to the task (the model keeps only the product)
+  uint32_t         pbarAt_ = 0;                // next refresh of the bars (10 Hz)
+  void             tickPModeBars(uint32_t now);
   Updater          updater_;
   UpdateView       updateView_;
   UpdateScreen     updateScreen_;

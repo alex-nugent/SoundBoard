@@ -16,6 +16,17 @@
 #include <string.h>
 
 static constexpr int16_t TOP_H = 20;
+static constexpr int16_t BARS_H = 14;                        // §4.5: the P mode blocks row, just above the labels (or the bottom line): 12 px of colour
+
+static int16_t barsY(const NormalView& v) { return (v.showLabels ? 86 : 118) - BARS_H; }
+
+// Far to near: green, yellow, red (RGB565). The colour alone carries the value.
+static uint16_t heat(uint8_t t) {
+  int r, g;
+  if (t < 128) { g = 63; r = t * 31 / 127; }                 // green -> yellow
+  else { r = 31; g = 63 - (t - 128) * 63 / 127; }            // yellow -> red
+  return (uint16_t)((r << 11) | (g << 5));
+}
 
 static void drawTop(Adafruit_GFX& g, const NormalView& v, const Theme& t) {
   g.fillRect(0, 0, SCR_W, TOP_H, COL_BG);
@@ -28,12 +39,21 @@ static void drawTop(Adafruit_GFX& g, const NormalView& v, const Theme& t) {
   } else {
     widgets::battery(g, 4, 1, v.battValid ? (int)v.battPct : -1, v.usb, battCol, t.dim, 2);
   }
-  if (v.muted) widgets::textRight(g, SCR_W - 4, 2, " MUTE ", 2, COL_BG, t.fg);
-  else { char s[12]; snprintf(s, sizeof s, "VOL %u", v.volumePct); widgets::textRight(g, SCR_W - 4, 2, s, 2, t.fg); }
+  int16_t leftEnd;                                            // where the battery text ends
+  if (v.lowBattery && v.battValid) leftEnd = 4 + widgets::textW("BATT LOW 100%", 2);
+  else { char pct[8]; snprintf(pct, sizeof pct, "%d%%", v.battValid ? (int)v.battPct : 0); leftEnd = 4 + 24 * 2 + widgets::textW(v.battValid ? pct : "--%", 2) + (v.usb ? 14 : 0); }
+  int16_t rightStart;
+  if (v.muted) { widgets::textRight(g, SCR_W - 4, 2, " MUTE ", 2, COL_BG, t.fg); rightStart = SCR_W - 4 - widgets::textW(" MUTE ", 2); }
+  else { char s[12]; snprintf(s, sizeof s, "VOL %u", v.volumePct); widgets::textRight(g, SCR_W - 4, 2, s, 2, t.fg); rightStart = SCR_W - 4 - widgets::textW(s, 2); }
+  if (v.pmode) {                                              // §4.5: a bold P centred in the free span (a 1 px double strike at scale 2)
+    int16_t x = (int16_t)((leftEnd + rightStart) / 2 - 6);
+    widgets::text(g, x, 2, "P", 2, t.fg);
+    widgets::text(g, (int16_t)(x + 1), 2, "P", 2, t.fg);
+  }
 }
 
 static void drawMain(Adafruit_GFX& g, const NormalView& v, const Theme& t) {
-  int16_t h = (v.showLabels ? 86 : 118) - TOP_H;
+  int16_t h = (v.showLabels ? 86 : 118) - TOP_H - (v.pmode ? BARS_H : 0);   // §4.5: the blocks take the bottom of the area
   g.fillRect(0, TOP_H, SCR_W, h, COL_BG);
   if (v.overlay[0]) {                                        // §11.5: volume popup / press label over the numeral
     int16_t y = TOP_H + (h - 24) / 2 - (v.overlayBar ? 6 : 0);
@@ -55,6 +75,14 @@ static void drawMain(Adafruit_GFX& g, const NormalView& v, const Theme& t) {
     g.fillRect(0, TOP_H, SCR_W, h, t.fg);
     widgets::textCentred(g, 0, SCR_W, y, line, scale, COL_BG, t.fg);
   } else widgets::textCentred(g, 0, SCR_W, y, line, scale, t.fg);
+}
+
+static void drawBars(Adafruit_GFX& g, const NormalView& v) {   // §4.5: one solid block per pad position, in the pads' own order
+  if (!v.pmode) return;                                      // off: the area belongs to the level line (drawMain clears it)
+  int16_t y = barsY(v);
+  g.fillRect(0, y, SCR_W, BARS_H, COL_BG);
+  const int16_t colW = SCR_W / 4, bw = colW - 12, bh = BARS_H - 2;
+  for (uint8_t i = 0; i < 4; i++) g.fillRect((int16_t)(i * colW + 6), y + 1, bw, bh, heat(v.pbar[i]));
 }
 
 static void drawLabels(Adafruit_GFX& g, const NormalView& v, const Theme& t) {
@@ -112,6 +140,7 @@ void NormalScreen::draw(Display& d, uint8_t regions) {
   const Theme& t = d.theme();
   if (regions & R_TOP)    drawTop(g, *view, t);
   if (regions & R_MAIN)   drawMain(g, *view, t);
+  if (regions & R_BARS)   drawBars(g, *view);
   if (regions & R_LABELS) drawLabels(g, *view, t);
   if (regions & (R_BOTTOM | R_NAME)) drawBottom(g, *view, t);   // R_NAME: a message changed
 }

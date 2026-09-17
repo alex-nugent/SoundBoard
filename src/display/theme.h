@@ -20,4 +20,4 @@ constexpr uint16_t COL_GRID  = 0x2104;
 constexpr int16_t  SCR_W = 240, SCR_H = 135;
 
 // Regions of the normal view (§11.4), used as dirty bits by every screen.
-enum : uint8_t { R_TOP = 1, R_MAIN = 2, R_NAME = 4 /* transient message */, R_LABELS = 8, R_BOTTOM = 16, R_ALL = 31 };
+enum : uint8_t { R_TOP = 1, R_MAIN = 2, R_NAME = 4 /* transient message */, R_LABELS = 8, R_BOTTOM = 16, R_BARS = 32 /* §4.5 P mode bars */, R_ALL = 63 };

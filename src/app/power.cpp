@@ -31,6 +31,7 @@ bool AppState::sleepAllowed() const {                          // §3.2
   if (hintShown_ || touch_.calibrating()) return false;
   if (recoveryRequested_) return false;
   if (setupOn_) return false;                                  // §3.2: SETUP blocks SLEEP
+  if (pmode_.on()) return false;                               // §4.5: P mode keeps the board awake until it is switched off
   return true;
 }
 
@@ -51,6 +52,7 @@ void AppState::fillRtcForSleep(uint8_t kind) {                 // §12.3 SLEEP s
 void AppState::quiesce() {                                     // §12.3 "Quiesce": <= 300 ms
   if (updater_.busy()) { char e[64]; updater_.cancel(e, sizeof e); }   // §16: a job dies with the power
   stopSetup("power down");                                     // §15.1: the AP and the net task go first (rule 14)
+  setPMode(false, "power down");                               // §4.5: never survives a power-down
   haptics_.stop(); jacks_.allOff();                            // §9.4 / §10: OFF stops the motor at once, every relay opens
   kbd_.shutdown(millis());                                     // §8.3: keys up, host dropped, advertising stopped
   if (audio_.playing()) {

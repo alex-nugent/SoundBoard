@@ -29,6 +29,7 @@ enum JacksMode : uint8_t { JACKS_FOLLOW, JACKS_PULSE, JACKS_OFF };
 enum SleepMode : uint8_t { SLEEP_DEEP, SLEEP_LIGHT };
 enum LogLevelCfg : uint8_t { LOGCFG_ERROR, LOGCFG_WARN, LOGCFG_INFO, LOGCFG_DEBUG };
 enum HwRevision: uint8_t { REV_A, REV_B };
+enum PModeTest : uint8_t { PMODE_TWO_SIDED, PMODE_ONE_SIDED };
 
 struct Entry {                       // one sound pad on one level
   char     sound[41];                // file in /sounds, "" = none
@@ -142,6 +143,7 @@ struct Config {
   struct { char ssid[33]; char password[65]; } wifi;
   struct { char repo[65]; char channel[25]; } update;
   struct { bool logToCard; uint8_t logLevel; } diag;   // logLevel: LogLevelCfg
+  struct { float k; uint16_t sampleHz; float sigma; uint8_t test; } pmode;   // §4.5 P mode: EMA constant, bit rate, threshold in sigma, test: PModeTest
 
   LevelSet levels;
 };

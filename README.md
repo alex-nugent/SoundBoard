@@ -161,8 +161,10 @@ DIMMED; console `m` opens it too (and `m` again exits and saves). The items
 are the descriptor rows flagged `MENU` in `menuOrder` plus the fixed ones
 (`lib/sbcore/src/app/menu_model.*`, native-tested): On-board speakers,
 Bluetooth speaker, Pair BT speaker, Bluetooth typing, Buzz, Screen
-brightness, Recalibrate buttons, Wi-Fi setup (a stub until Phase 10: "NOT
-AVAILABLE YET"), Save and exit, Cancel changes. The Volume item of the draft
+brightness, P mode, Recalibrate buttons, Wi-Fi setup (a stub until Phase 10: "NOT
+AVAILABLE YET"), Save and exit, Cancel changes. P mode (§4.5) is the one
+value item that is not a setting: on or off for this power-up only, never
+saved; console `pm` toggles it and `s` prints its counters. The Volume item of the draft
 is gone (CP-9: the − / + buttons do that from the normal view). The keys were
 laid out at CP-9 with Alex: the bottom row shows one word above each pad,
 **BACK  DOWN  UP  NEXT**, so the left half goes back or down and the right
