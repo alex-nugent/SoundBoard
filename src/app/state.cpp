@@ -1177,6 +1177,7 @@ void AppState::tick() {
   if (mode_ == AppMode::Active || mode_ == AppMode::Dimmed) {
     if (touch_.wakePending() && touch_.wakeReadable() && railReady_) touch_.consumeWake(now);   // §4.1: the latched wake press, once the rail is ready
     press_.tick(now);                                            // §5.2 step 7 / §5.3 step 7: repeats while held
+    if (pmode_.on()) levels_.onInput(now);                       // §4.5: no return to level 1 while P mode runs (the timer restarts when it stops)
     sb::LevelChange back = levels_.tickReturnTimer(now);         // §5.3: return to level 1
     if (back.changed) { char why[40]; snprintf(why, sizeof why, "no input for %u s", (unsigned)cfg_.levelChange.returnToFirstAfterS); applyLevel(back, why, now); }
   }
